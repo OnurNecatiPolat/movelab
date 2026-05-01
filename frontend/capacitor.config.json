@@ -1,0 +1,8 @@
+{
+  "appId": "com.movelab.reviewstudio",
+  "appName": "MoveLab",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}

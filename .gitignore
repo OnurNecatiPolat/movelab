@@ -1,0 +1,16 @@
+.env
+*.log
+
+backend/.venv/
+backend/data/*.sqlite
+backend/data/*.sqlite-*
+backend/app/**/__pycache__/
+backend/scripts/**/__pycache__/
+
+frontend/node_modules/
+frontend/dist/
+
+.runtime/
+*.pyc
+
+tools/stockfish/*.exe

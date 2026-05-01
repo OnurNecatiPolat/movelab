@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: movelab-api
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    envVars:
+      - key: MOVELAB_DATABASE_URL
+        sync: false
+      - key: MOVELAB_CORS_ORIGINS
+        sync: false
+      - key: STOCKFISH_PATH
+        value: /usr/games/stockfish
+      - key: CHESSCOM_USER_AGENT
+        value: MoveLab/0.8 cloud-training-app contact: support@movelab.app
+      - key: MOVELAB_DEPTH
+        value: "12"
+      - key: MOVELAB_DEEP_DEPTH
+        value: "16"

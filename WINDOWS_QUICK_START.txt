@@ -1,0 +1,20 @@
+MoveLab Windows Quick Start
+
+0. PostgreSQL kuracaksan once README_POSTGRESQL_WINDOWS.md dosyasini izle.
+
+1. .env olustur ve MOVELAB_DATABASE_URL ayarla.
+
+2. Backend kontrol:
+   powershell -ExecutionPolicy Bypass -File .\scripts\windows_check_backend.ps1
+
+3. Backend baslat:
+   powershell -ExecutionPolicy Bypass -File .\scripts\windows_run_backend.ps1
+
+4. Ayri terminalde frontend baslat:
+   powershell -ExecutionPolicy Bypass -File .\scripts\windows_run_frontend.ps1
+
+5. Uygulamayi ac:
+   http://127.0.0.1:5173
+
+Stockfish onerilen konum:
+   C:\MoveLabFresh\tools\stockfish\stockfish.exe
