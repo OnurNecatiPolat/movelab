@@ -45,11 +45,12 @@ def normalize_database_url(url: str) -> str:
     parsed = urlsplit(url)
     sslmode = os.getenv("MOVELAB_DATABASE_SSLMODE")
     needs_railway_ssl = parsed.hostname and parsed.hostname.endswith(".proxy.rlwy.net")
-    if not sslmode and not needs_railway_ssl:
-        return url
+    connect_timeout = os.getenv("MOVELAB_DATABASE_CONNECT_TIMEOUT", "10")
 
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    query.setdefault("sslmode", sslmode or "require")
+    if sslmode or needs_railway_ssl:
+        query.setdefault("sslmode", sslmode or "require")
+    query.setdefault("connect_timeout", connect_timeout)
     return urlunsplit(parsed._replace(query=urlencode(query)))
 
 
