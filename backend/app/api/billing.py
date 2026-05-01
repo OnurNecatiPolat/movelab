@@ -7,36 +7,36 @@ router = APIRouter(prefix="/api/billing", tags=["billing"])
 
 PLAN_CATALOG = [
     {
-        "id": "starter",
-        "name": "Starter",
-        "priceLabel": "14 EUR / user / month",
-        "audience": "Solo players and coaches",
+        "id": "supporter",
+        "name": "Destekçi",
+        "priceLabel": "IBAN bekleniyor",
+        "audience": "MoveLab'i desteklemek isteyen oyuncular",
         "features": [
-            "Game review workspace",
-            "Momentum and move quality dashboards",
-            "PGN and Chess.com imports",
+            "Gönüllü destek yüzeyi",
+            "Kart veya ödeme sağlayıcısı bağlı değil",
+            "IBAN eklendiğinde açıklama alanı burada gösterilecek",
         ],
     },
     {
-        "id": "pro",
-        "name": "Pro",
-        "priceLabel": "39 EUR / seat / month",
-        "audience": "Serious training stacks",
+        "id": "coach-support",
+        "name": "Koç Desteği",
+        "priceLabel": "Yakında",
+        "audience": "Antrenörler ve çalışma grupları",
         "features": [
-            "Team workspace",
-            "Shared review queues",
-            "Priority engine orchestration",
+            "Toplu çalışma desteği için bağış notu",
+            "Fatura veya abonelik akışı yok",
+            "Ödeme yöntemi sonradan bağlanacak",
         ],
     },
     {
-        "id": "academy",
-        "name": "Academy",
-        "priceLabel": "Custom annual plan",
-        "audience": "Clubs, schools, academies",
+        "id": "academy-donation",
+        "name": "Kulüp Katkısı",
+        "priceLabel": "IBAN sonrası",
+        "audience": "Kulüpler ve akademiler",
         "features": [
-            "Managed onboarding",
-            "Role-based access and reporting",
-            "Contract billing placeholders",
+            "Kurumsal destek notu",
+            "Şu an tahsilat yapılmaz",
+            "IBAN bilgisi eklenene kadar pasif kalır",
         ],
     },
 ]
@@ -54,8 +54,8 @@ def catalog():
         "portalUrl": BILLING_PORTAL_URL or None,
         "supportEmail": BILLING_SUPPORT_EMAIL,
         "plans": PLAN_CATALOG,
-        "checkoutStatus": "placeholder",
-        "message": "Odeme saglayicisi henuz bagli degil. Checkout akisina hazir iskelet kuruldu.",
+        "checkoutStatus": "donation-placeholder",
+        "message": "Bagis alani hazir. IBAN bilgisi eklenene kadar tahsilat yapilmaz.",
     }
 
 
@@ -66,5 +66,5 @@ def checkout_intent(payload: CheckoutIntentRequest):
         "provider": BILLING_PROVIDER,
         "planId": payload.plan_id,
         "seats": payload.seats,
-        "message": "Checkout endpoint hazir. Gercek odeme saglayicisi baglantisi sonradan eklenecek.",
+        "message": "Bagis alani hazir. IBAN eklenene kadar aktif tahsilat yok.",
     }

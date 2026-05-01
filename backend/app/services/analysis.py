@@ -18,15 +18,17 @@ def analyze_game(session, game_id, depth=12, passes=3, time_limit=0.45, force=Fa
 
     with StockfishService() as engine:
         for move in moves:
-            already_analyzed = bool(move.analysis and move.analysis.loss_cp is not None)
+            already_analyzed = bool(
+                move.analysis
+                and move.analysis.loss_cp is not None
+                and int(move.analysis.depth or 0) >= int(depth or 0)
+            )
 
             if already_analyzed and not force:
                 analyzed += 1
                 continue
 
             if max_moves is not None and processed >= max_moves:
-                if already_analyzed:
-                    analyzed += 1
                 continue
 
             board_before = chess.Board(move.fen_before)

@@ -8,6 +8,15 @@ PIECE_VALUES = {
     chess.QUEEN: 900,
 }
 
+PIECE_NAMES = {
+    chess.PAWN: "piyon",
+    chess.KNIGHT: "at",
+    chess.BISHOP: "fil",
+    chess.ROOK: "kale",
+    chess.QUEEN: "vezir",
+    chess.KING: "sah",
+}
+
 
 def normalize_side(side):
     value = str(side or "").lower()
@@ -87,6 +96,78 @@ def is_missed(loss_cp, side, eval_before_cp, eval_after_cp):
     return before >= 180 and (before - after) >= 110
 
 
+def move_context(san, best_uci, played_uci, fen_before, fen_after):
+    details = []
+
+    try:
+        board_before = chess.Board(fen_before)
+        board_after = chess.Board(fen_after)
+        played = chess.Move.from_uci(played_uci) if played_uci else None
+    except ValueError:
+        board_before = None
+        board_after = None
+        played = None
+
+    if played and board_before:
+        piece = board_before.piece_at(played.from_square)
+        captured = board_before.piece_at(played.to_square)
+        if piece:
+            details.append(
+                f"{PIECE_NAMES.get(piece.piece_type, 'tas')} {chess.square_name(played.from_square)}-{chess.square_name(played.to_square)} hattina gitti"
+            )
+        if captured:
+            details.append(
+                f"{chess.square_name(played.to_square)} karesindeki {PIECE_NAMES.get(captured.piece_type, 'tas')} alindi"
+            )
+        if board_before.is_castling(played):
+            details.append("rok ile sah guvenligi guncellendi")
+        if played.promotion:
+            details.append(f"terfi {PIECE_NAMES.get(played.promotion, 'tas')} ile geldi")
+
+    if board_after:
+        if board_after.is_check():
+            details.append("hamle sonrasi sah cekiliyor")
+        legal_checks = 0
+        for candidate in board_after.legal_moves:
+            try:
+                board_after.push(candidate)
+                if board_after.is_check():
+                    legal_checks += 1
+                board_after.pop()
+            except Exception:
+                pass
+        if legal_checks:
+            details.append(f"rakibin {legal_checks} sah cekme kaynagi var")
+
+    if best_uci and played_uci and best_uci != played_uci:
+        details.append(f"motorun ilk tercihi {best_uci}, oynanan {played_uci}")
+    elif best_uci and played_uci == best_uci:
+        details.append("oynanan hamle motorun ilk tercihiyle eslesiyor")
+
+    if is_forcing_san(san):
+        details.append("hamle forcing karakter tasiyor")
+
+    return "; ".join(details[:4])
+
+
+def build_explanation(base, loss, san, best_uci, played_uci, fen_before, fen_after, side, eval_before_cp, eval_after_cp):
+    side_bool = normalize_side(side)
+    before = eval_for_side(eval_before_cp, side_bool)
+    after = eval_for_side(eval_after_cp, side_bool)
+    context = move_context(san, best_uci, played_uci, fen_before, fen_after)
+
+    parts = [base]
+    if before is not None and after is not None:
+        parts.append(
+            f"Taraf perspektifinde eval {before / 100:+.2f}'den {after / 100:+.2f}'ye gitti; kayip {loss / 100:.2f} piyon."
+        )
+    if best_uci and played_uci and best_uci != played_uci:
+        parts.append(f"Daha temiz aday {best_uci}; oynanan {played_uci} ayni kaliteyi koruyamadi.")
+    if context:
+        parts.append(f"Pozisyon izi: {context}.")
+    return " ".join(parts)
+
+
 def classify_move(
     loss_cp,
     san,
@@ -100,7 +181,7 @@ def classify_move(
     analyzed=True,
 ):
     if not analyzed or loss_cp is None:
-        return "book", "Analiz yok", 0.0, "Bu hamle için motor analizi henüz yok."
+        return "book", "Analiz yok", 0.0, "Bu hamle icin motor analizi henuz yok."
 
     loss = max(0.0, float(loss_cp))
 
@@ -109,27 +190,56 @@ def classify_move(
             "brilliant",
             "Parlak fikir",
             0.72,
-            "Düşük motor kaybıyla risk, feda veya forcing karakteri taşıyor ve pozisyonu ayakta tutuyor.",
+            build_explanation(
+                "Dusuk motor kaybiyla riskli veya forcing bir fikir calisiyor.",
+                loss,
+                san,
+                best_uci,
+                played_uci,
+                fen_before,
+                fen_after,
+                side,
+                eval_before_cp,
+                eval_after_cp,
+            ),
         )
 
     if is_missed(loss, side, eval_before_cp, eval_after_cp):
         return (
             "missed",
-            "Kaçan fırsat",
+            "Kacan firsat",
             0.66,
-            "Daha güçlü bir devam varken avantajın önemli bir kısmı kaçmış görünüyor.",
+            build_explanation(
+                "Avantaji buyutacak devam kacmis; hamle guvenli gorunse de baskiyi yeterince artirmiyor.",
+                loss,
+                san,
+                best_uci,
+                played_uci,
+                fen_before,
+                fen_after,
+                side,
+                eval_before_cp,
+                eval_after_cp,
+            ),
         )
 
-    if loss >= 320:
-        return "blunder", "Kritik hata", 0.90, "Çok büyük centipawn kaybı; taktik güvenlik taraması gerekli."
-    if loss >= 190:
-        return "mistake", "Hata", 0.86, "Belirgin hata; aday hamleler yeniden kıyaslanmalı."
-    if loss >= 115:
-        return "wrong", "Ciddi sapma", 0.78, "Plan yönü veya taktik hesapta ciddi sapma var."
-    if loss >= 60:
-        return "inaccuracy", "Küçük hata", 0.72, "Küçük ama birikince baskı yaratan doğruluk kaybı."
-    if loss >= 28:
-        return "good", "İyi hamle", 0.70, "Oynanabilir hamle; daha iyi alternatif mevcut olabilir."
-    if loss >= 9:
-        return "excellent", "Mükemmel hamle", 0.74, "Motor çizgisine yakın, güçlü hamle."
-    return "best", "En iyi hamle", 0.78, "Motor çizgisine çok yakın."
+    explanations = [
+        (320, "blunder", "Kritik hata", 0.90, "Kritik taktik veya konumsal kayip var; sah, alma ve tehdit kontrolu kacmis."),
+        (190, "mistake", "Hata", 0.86, "Belirgin hata; aday hamleler arasinda motorun ana fikri korunamamis."),
+        (115, "wrong", "Ciddi sapma", 0.78, "Plan yonu saptigi icin pozisyon kalitesi ciddi dusuyor."),
+        (60, "inaccuracy", "Kucuk hata", 0.72, "Kucuk dogruluk kaybi var; pozisyon oynanir ama baski veya koordinasyon azaliyor."),
+        (28, "good", "Iyi hamle", 0.70, "Oynanabilir hamle; motor daha temiz bir aday bulsa da pozisyon dengesi korunuyor."),
+        (9, "excellent", "Mukemmel hamle", 0.74, "Motor cizgisine yakin guclu hamle; ana plan korunuyor."),
+        (0, "best", "En iyi hamle", 0.78, "Motor cizgisine cok yakin; hesap ve plan uyumlu."),
+    ]
+
+    for threshold, quality, label, confidence, base in explanations:
+        if loss >= threshold:
+            return (
+                quality,
+                label,
+                confidence,
+                build_explanation(base, loss, san, best_uci, played_uci, fen_before, fen_after, side, eval_before_cp, eval_after_cp),
+            )
+
+    return "best", "En iyi hamle", 0.78, "Motor cizgisine cok yakin."

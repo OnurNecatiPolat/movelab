@@ -121,8 +121,25 @@ function errorMessage(payload, fallback = "İstek tamamlanamadı.") {
   return fallback;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(url, options = {}, attempts = 3) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fetch(url, {mode: "cors", ...options});
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await sleep(450 * attempt);
+    }
+  }
+  throw new ApiError(lastError?.message || "Backend bağlantısı kurulamadı.", 0, null);
+}
+
 async function getJson(path, token) {
-  const response = await fetch(API_BASE + path, {
+  const response = await fetchWithRetry(API_BASE + path, {
     headers: tokenHeaders(token),
   });
   if (!response.ok) {
@@ -133,7 +150,7 @@ async function getJson(path, token) {
 }
 
 async function postJson(path, payload = {}, token) {
-  const response = await fetch(API_BASE + path, {
+  const response = await fetchWithRetry(API_BASE + path, {
     method: "POST",
     headers: {"Content-Type": "application/json", ...tokenHeaders(token)},
     body: JSON.stringify(payload),
@@ -261,11 +278,17 @@ function App() {
   const [freePos, setFreePos] = useState([]);
   const [freeIdx, setFreeIdx] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState(null);
   const [shadow, setShadow] = useState(false);
   const [message, setMessage] = useState("");
   const [token, setToken] = useLocal("movelab_token_v8", null);
   const [user, setUser] = useLocal("movelab_user_v8", null);
-  const [syncForm, setSyncForm] = useState({username: user?.chesscomUsername || "", maxArchives: 2});
+  const [syncForm, setSyncForm] = useState({
+    username: user?.chesscomUsername || "",
+    ownerUsername: user?.chesscomUsername || user?.username || "",
+    allArchives: true,
+    maxArchives: 12,
+  });
   const [pgnForm, setPgnForm] = useState({ownerUsername: user?.username || "", url: "", pgn: ""});
 
   const positions = free ? freePos : review.positions;
@@ -334,7 +357,11 @@ function App() {
     try {
       const data = await getJson("/api/auth/me", token);
       setUser(data.user);
-      setSyncForm((current) => ({...current, username: current.username || data.user?.chesscomUsername || ""}));
+      setSyncForm((current) => ({
+        ...current,
+        username: current.username || data.user?.chesscomUsername || "",
+        ownerUsername: current.ownerUsername || data.user?.chesscomUsername || data.user?.username || "",
+      }));
       setPgnForm((current) => ({...current, ownerUsername: current.ownerUsername || data.user?.username || ""}));
     } catch (error) {
       if (error.status === 401 || error.status === 403) {
@@ -357,27 +384,47 @@ function App() {
     }
 
     setBusy(true);
-    setMessage(deep ? "Derin analiz partisi çalışıyor." : "Hızlı analiz başlatıldı.");
+    setAnalysisProgress({
+      active: true,
+      label: deep ? "Derin analiz hazırlanıyor" : "Hızlı analiz hazırlanıyor",
+      percent: 0,
+      analyzed: game.analysisStatus?.analyzedMoves || 0,
+      total: game.analysisStatus?.totalMoves || 0,
+    });
+    setMessage(deep ? "Derin analiz yüzde 100'e kadar otomatik ilerliyor." : "Hızlı analiz başlatıldı.");
 
     try {
-      const result = await postJson(`/api/games/${gameId}/analyze`, {
-        force: false,
-        deep,
-        passes: deep ? 2 : 1,
-        depth: deep ? 14 : 10,
-        time_limit: deep ? 0.35 : 0.22,
-        max_moves: deep ? 10 : 24,
-      });
-      await Promise.all([loadReview(gameId), loadHealth()]);
-      setMessage(
-        result.remaining > 0
-          ? `${result.processed} hamle işlendi. ${result.remaining} hamle kaldı; devam etmek için analizi tekrar çalıştır.`
-          : "Analiz tamamlandı."
-      );
+      let result = null;
+      let guard = 0;
+      do {
+        result = await postJson(`/api/games/${gameId}/analyze`, {
+          force: false,
+          deep,
+          passes: deep ? 2 : 1,
+          depth: deep ? 14 : 10,
+          time_limit: deep ? 0.35 : 0.22,
+          max_moves: deep ? 8 : 24,
+        });
+
+        const percent = result.total ? Math.min(100, Math.round((result.analyzed / result.total) * 100)) : 100;
+        setAnalysisProgress({
+          active: true,
+          label: deep ? "Derin analiz çalışıyor" : "Hızlı analiz çalışıyor",
+          percent,
+          analyzed: result.analyzed,
+          total: result.total,
+        });
+        await Promise.all([loadReview(gameId), loadHealth()]);
+        guard += 1;
+      } while (deep && result?.remaining > 0 && guard < 80);
+
+      setAnalysisProgress((current) => current ? {...current, percent: 100, label: "Analiz tamamlandı"} : null);
+      setMessage(result?.remaining > 0 ? `${result.remaining} hamle daha kaldı; servis süre sınırına takılmamak için tekrar dene.` : "Analiz tamamlandı.");
     } catch (error) {
       setMessage(error.message || "Analiz sırasında hata oluştu.");
     } finally {
       setBusy(false);
+      setTimeout(() => setAnalysisProgress(null), 900);
     }
   }
 
@@ -418,10 +465,12 @@ function App() {
     try {
       const result = await postJson("/api/import/chesscom", {
         username: syncForm.username.trim(),
-        max_archives: Number(syncForm.maxArchives || 2),
+        owner_username: syncForm.ownerUsername.trim() || syncForm.username.trim(),
+        all_archives: Boolean(syncForm.allArchives),
+        max_archives: syncForm.allArchives ? null : Number(syncForm.maxArchives || 12),
       });
       await refreshAll();
-      setMessage(`${result.imported} oyun içe aktarıldı${result.failed_count ? `, ${result.failed_count} oyun raporlandı.` : "."}`);
+      setMessage(`${result.imported} oyun içe aktarıldı. ${result.archives_checked} arşiv tarandı${result.failed_count ? `, ${result.failed_count} oyun raporlandı.` : "."}`);
     } catch (error) {
       setMessage(error.message || "Chess.com senkronizasyonu başarısız.");
     } finally {
@@ -479,7 +528,11 @@ function App() {
 
   useEffect(() => {
     if (user?.chesscomUsername) {
-      setSyncForm((current) => ({...current, username: current.username || user.chesscomUsername}));
+      setSyncForm((current) => ({
+        ...current,
+        username: current.username || user.chesscomUsername,
+        ownerUsername: current.ownerUsername || user.chesscomUsername,
+      }));
     }
     if (user?.username) {
       setPgnForm((current) => ({...current, ownerUsername: current.ownerUsername || user.username}));
@@ -604,6 +657,7 @@ function App() {
               setGameId={setGameId}
               analyze={analyze}
               busy={busy}
+              analysisProgress={analysisProgress}
               positions={positions}
               reviewPositions={review.positions}
               pos={position}
@@ -675,7 +729,7 @@ function App() {
 function ReviewPage(props) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const {
-    game, games, gameId, setGameId, analyze, busy,
+    game, games, gameId, setGameId, analyze, busy, analysisProgress,
     positions, reviewPositions, pos, compare, active,
     idx, setIdx, cmp, setCmp, free, setFree, freePos,
     setFreePos, freeIdx, setFreeIdx, shadow, setShadow,
@@ -726,7 +780,7 @@ function ReviewPage(props) {
                 Hızlı analiz
               </Button>
               <Button cls="btn-violet" disabled={busy || !hasGames} onClick={() => analyze(true)} title="Derin analiz çalıştır">
-                <WandSparkles size={16} />
+                {busy && analysisProgress?.active ? <Loader2 size={16} className="spin" /> : <WandSparkles size={16} />}
                 Derin parti
               </Button>
               <Button
@@ -759,6 +813,8 @@ function ReviewPage(props) {
           </div>
         </div>
       </Card>
+
+      {analysisProgress?.active && <AnalysisProgress progress={analysisProgress} />}
 
       <AccuracyPanel game={game} analyzed={analyzed} total={total} />
 
@@ -871,6 +927,26 @@ function AccuracyPanel({game, analyzed, total}) {
   );
 }
 
+function AnalysisProgress({progress}) {
+  const percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
+  return (
+    <Card cls="card-pad analysis-progress-card">
+      <div className="analysis-orbit" aria-hidden="true">
+        <div />
+      </div>
+      <div className="analysis-progress-copy">
+        <div className="eyebrow">Engine queue</div>
+        <strong>{progress.label}</strong>
+        <div className="small">{progress.analyzed || 0}/{progress.total || 0} hamle derinlik kontrolünden geçti</div>
+        <div className="metric-track">
+          <div className="metric-fill" style={{width: `${percent}%`}} />
+        </div>
+      </div>
+      <div className="analysis-percent">{percent}%</div>
+    </Card>
+  );
+}
+
 function AccuracyMeter({label, value, tone}) {
   const width = Math.max(0, Math.min(100, numericAcc(value)));
   return (
@@ -972,12 +1048,22 @@ function StudioPage({systemStatus, platformStats, busy, syncForm, setSyncForm, p
           </div>
           <label className="field-label">Kullanıcı adı</label>
           <input value={syncForm.username} onChange={(event) => setSyncForm({...syncForm, username: event.target.value})} placeholder="Chess.com kullanıcı adı" />
-          <label className="field-label">Arşiv sayısı</label>
-          <input type="number" min="1" max="24" value={syncForm.maxArchives} onChange={(event) => setSyncForm({...syncForm, maxArchives: event.target.value})} />
+          <label className="field-label">Doğruluk eşleşmesi</label>
+          <input value={syncForm.ownerUsername} onChange={(event) => setSyncForm({...syncForm, ownerUsername: event.target.value})} placeholder="hangi hesabın rengi/doğruluğu izlensin?" />
+          <label className="check-line">
+            <input type="checkbox" checked={syncForm.allArchives} onChange={(event) => setSyncForm({...syncForm, allArchives: event.target.checked})} />
+            Tüm Chess.com arşivlerini çek
+          </label>
+          {!syncForm.allArchives && (
+            <>
+              <label className="field-label">Son arşiv sayısı</label>
+              <input type="number" min="1" max="600" value={syncForm.maxArchives} onChange={(event) => setSyncForm({...syncForm, maxArchives: event.target.value})} />
+            </>
+          )}
           <div className="spacer-12" />
           <Button cls="btn-dark" disabled={busy} onClick={syncChesscom} title="Chess.com senkronizasyonunu başlat">
             {busy ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
-            Sync başlat
+            Oyunları veritabanına çek
           </Button>
         </Card>
 
@@ -1041,13 +1127,13 @@ function BillingPage({catalog, requestCheckout}) {
   return (
     <div className="page-grid">
       <Card cls="card-pad section-header billing-header">
-        <div className="eyebrow">Revenue surface</div>
-        <h1 className="title">Billing hazır, provider bekliyor</h1>
+        <div className="eyebrow">Donation surface</div>
+        <h1 className="title">Bağış alanı hazır, IBAN bekliyor</h1>
         <p className="hero-copy">{catalog.message}</p>
         <div className="hero-badges">
           <Badge>Provider {catalog.provider}</Badge>
           <Badge>Support {catalog.supportEmail}</Badge>
-          {catalog.portalUrl ? <Badge>Portal ready</Badge> : <Badge>Portal pending</Badge>}
+          <Badge>Tahsilat pasif</Badge>
         </div>
       </Card>
 
@@ -1064,7 +1150,7 @@ function BillingPage({catalog, requestCheckout}) {
             </ul>
             <Button cls="btn-dark" onClick={() => requestCheckout(plan.id)} title={`${plan.name} planı için checkout hazırlığı`}>
               <CreditCard size={16} />
-              Checkout hazırlığı
+              Bağış bilgisi bekleniyor
             </Button>
           </Card>
         ))}
@@ -1074,13 +1160,12 @@ function BillingPage({catalog, requestCheckout}) {
         <div className="split-head">
           <div>
             <div className="eyebrow">Implementation boundary</div>
-            <strong>Ödeme yöntemleri ve gerçek checkout bağlanmadı</strong>
+            <strong>IBAN verilene kadar ödeme alanı pasif</strong>
           </div>
           <ShieldCheck size={18} />
         </div>
         <p className="small">
-          Bu ekran ürün akışını, plan kataloğunu ve backend checkout intent iskeletini hazır hale getiriyor.
-          Gerçek sağlayıcı bağlandığında kart, fatura, vergi ve abonelik mantığı bu yüzeye oturacak.
+          Bu ekran bağış niyeti için hazırlandı. IBAN bilgisi verilene kadar kart, checkout, abonelik veya tahsilat akışı çalışmaz.
         </p>
       </Card>
     </div>

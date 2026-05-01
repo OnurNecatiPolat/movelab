@@ -33,11 +33,20 @@ class PgnImportRequest(BaseModel):
 
 class ChesscomSyncRequest(BaseModel):
     username: str = Field(min_length=1, max_length=80)
-    max_archives: int = Field(default=2, ge=1, le=24)
+    owner_username: str | None = Field(default=None, max_length=80)
+    max_archives: int | None = Field(default=None, ge=1, le=600)
+    all_archives: bool = True
 
     @field_validator("username")
     @classmethod
     def clean_username(cls, value):
+        return value.strip()
+
+    @field_validator("owner_username")
+    @classmethod
+    def clean_owner_username(cls, value):
+        if value is None or value.strip() == "":
+            return None
         return value.strip()
 
 
@@ -63,12 +72,14 @@ def import_pgn(payload: PgnImportRequest):
 @router.post("/chesscom")
 async def sync_chesscom(payload: ChesscomSyncRequest):
     username = payload.username
+    owner_username = payload.owner_username or username
     request_headers = {"User-Agent": CHESSCOM_USER_AGENT}
     archive_urls = []
     games = []
 
     try:
-        async with httpx.AsyncClient(timeout=45, headers=request_headers, follow_redirects=True) as client:
+        timeout = httpx.Timeout(60.0, connect=15.0)
+        async with httpx.AsyncClient(timeout=timeout, headers=request_headers, follow_redirects=True) as client:
             archives_response = await client.get(
                 f"https://api.chess.com/pub/player/{username}/games/archives"
             )
@@ -86,7 +97,12 @@ async def sync_chesscom(payload: ChesscomSyncRequest):
                 )
 
             archives_response.raise_for_status()
-            archive_urls = archives_response.json().get("archives", [])[-payload.max_archives:]
+            all_archive_urls = archives_response.json().get("archives", [])
+            if payload.all_archives:
+                archive_urls = all_archive_urls
+            else:
+                archive_count = payload.max_archives or 12
+                archive_urls = all_archive_urls[-archive_count:]
 
             for archive_url in archive_urls:
                 archive_response = await client.get(archive_url)
@@ -138,7 +154,7 @@ async def sync_chesscom(payload: ChesscomSyncRequest):
                         skipped += 1
                         continue
 
-                    game_id = insert_game(session, username, pgn, parsed_headers, game.get("url"))
+                    game_id = insert_game(session, owner_username, pgn, parsed_headers, game.get("url"))
                     moves = parse_pgn_moves(game_id, pgn)
                     replace_moves(session, game_id, moves)
                     imported += 1
@@ -152,6 +168,7 @@ async def sync_chesscom(payload: ChesscomSyncRequest):
             return {
                 "status": "ok" if not failed else "partial",
                 "username": username,
+                "owner_username": owner_username,
                 "archives_checked": len(archive_urls),
                 "games_seen": len(games),
                 "imported": imported,
