@@ -69,12 +69,24 @@ ENGINE_TIME_LIMIT = float(os.getenv("MOVELAB_ENGINE_TIME", "0.45"))
 DEEP_ENGINE_TIME_LIMIT = float(os.getenv("MOVELAB_DEEP_ENGINE_TIME", "0.80"))
 MAX_PGN_BYTES = int(os.getenv("MOVELAB_MAX_PGN_BYTES", str(2 * 1024 * 1024)))
 
-DEFAULT_CORS_ORIGINS = "http://127.0.0.1:5173,http://localhost:5173,https://localhost,capacitor://localhost"
-CORS_ORIGINS = [
+DEFAULT_CORS_ORIGINS = (
+    "http://127.0.0.1:5173,http://localhost:5173,http://localhost,"
+    "https://localhost,capacitor://localhost,ionic://localhost,"
+    "https://movelab-seven.vercel.app"
+)
+RUNTIME_CORS_ORIGINS = [
+    "http://localhost",
+    "https://localhost",
+    "capacitor://localhost",
+    "ionic://localhost",
+    "https://movelab-seven.vercel.app",
+]
+_configured_cors_origins = [
     origin.strip()
     for origin in os.getenv("MOVELAB_CORS_ORIGINS", DEFAULT_CORS_ORIGINS).split(",")
     if origin.strip()
 ]
+CORS_ORIGINS = sorted(set(_configured_cors_origins + RUNTIME_CORS_ORIGINS))
 CORS_ORIGIN_REGEX = os.getenv("MOVELAB_CORS_ORIGIN_REGEX", r"https://.*\.vercel\.app").strip() or None
 
 CHESSCOM_USER_AGENT = os.getenv(

@@ -32,10 +32,14 @@ import {
 } from "lucide-react";
 import "./styles/app.css";
 
-const DEFAULT_API_BASE = import.meta.env.PROD
-  ? "https://movelab-production-f81c.up.railway.app"
-  : "http://127.0.0.1:8000";
-const API_BASE = (import.meta.env.VITE_API_BASE || DEFAULT_API_BASE).replace(/\/$/, "");
+const CLOUD_API_BASE = "https://movelab-production-f81c.up.railway.app";
+const LOCAL_API_BASE = "http://127.0.0.1:8000";
+const ENV_API_BASE = import.meta.env.VITE_API_BASE || "";
+const API_BASES = Array.from(new Set([
+  ENV_API_BASE,
+  import.meta.env.PROD ? CLOUD_API_BASE : LOCAL_API_BASE,
+  CLOUD_API_BASE,
+].map((base) => base.trim().replace(/\/$/, "")).filter(Boolean)));
 const APP_VERSION = "0.8.0";
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
 const RANKS = [8, 7, 6, 5, 4, 3, 2, 1];
@@ -149,25 +153,34 @@ function uiError(error, fallback = "İstek tamamlanamadı.") {
   return error?.message || fallback;
 }
 
-async function fetchWithRetry(url, options = {}, attempts = 4) {
+function apiUrls(pathOrUrl) {
+  if (/^https?:\/\//i.test(pathOrUrl)) return [pathOrUrl];
+  const path = pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`;
+  return API_BASES.map((base) => `${base}${path}`);
+}
+
+async function fetchWithRetry(pathOrUrl, options = {}, attempts = 3) {
   let lastError = null;
   let lastResponse = null;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      const response = await fetch(url, {mode: "cors", cache: "no-store", ...options});
-      if (!isTransientStatus(response.status) || attempt === attempts) return response;
-      lastResponse = response;
-    } catch (error) {
-      lastError = error;
+  const urls = apiUrls(pathOrUrl);
+  for (const url of urls) {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const response = await fetch(url, {mode: "cors", cache: "no-store", ...options});
+        if (!isTransientStatus(response.status)) return response;
+        lastResponse = response;
+      } catch (error) {
+        lastError = error;
+      }
+      if (attempt < attempts) await sleep(500 * attempt);
     }
-    if (attempt < attempts) await sleep(650 * attempt);
   }
   if (lastResponse) return lastResponse;
   throw new ApiError(friendlyNetworkMessage(lastError), 0, null);
 }
 
 async function getJson(path, token) {
-  const response = await fetchWithRetry(API_BASE + path, {
+  const response = await fetchWithRetry(path, {
     headers: tokenHeaders(token),
   });
   if (!response.ok) {
@@ -178,7 +191,7 @@ async function getJson(path, token) {
 }
 
 async function postJson(path, payload = {}, token) {
-  const response = await fetchWithRetry(API_BASE + path, {
+  const response = await fetchWithRetry(path, {
     method: "POST",
     headers: {"Content-Type": "application/json", ...tokenHeaders(token)},
     body: JSON.stringify(payload),
