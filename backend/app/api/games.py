@@ -1,7 +1,7 @@
 import chess
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.core.config import (
     DEEP_DEPTH,
@@ -11,6 +11,7 @@ from app.core.config import (
 )
 from app.core.db import db
 from app.domain.classifier import classify_move
+from app.domain.coach import build_coach_summary, human_move_advice
 from app.models import Analysis, Game, Move
 from app.repositories.games import game_accuracies, game_card, game_title, list_games
 from app.services.analysis import analyze_game
@@ -26,6 +27,17 @@ class AnalyzeRequest(BaseModel):
     time_limit: float | None = Field(default=None, ge=0.1, le=3.0)
     deep: bool = False
     max_moves: int | None = Field(default=None, ge=1, le=80)
+
+
+class AnalyzeAllRequest(BaseModel):
+    force: bool = False
+    deep: bool = True
+    depth: int | None = Field(default=None, ge=6, le=24)
+    passes: int = Field(default=2, ge=1, le=5)
+    time_limit: float | None = Field(default=None, ge=0.1, le=3.0)
+    max_games: int = Field(default=4, ge=1, le=25)
+    max_moves_per_game: int = Field(default=10, ge=1, le=80)
+    owner_username: str | None = Field(default=None, max_length=80)
 
 
 class MoveAnalyzeRequest(BaseModel):
@@ -117,7 +129,17 @@ def review(game_id: int):
                 "loss": analysis.loss_cp if analysis and analysis.loss_cp is not None else 0,
                 "phase": move.phase,
                 "label": analysis.quality_label if analysis and analysis.quality_label else "Analiz yok",
-                "advice": analysis.explanation if analysis and analysis.explanation else "Bu hamle icin detayli analiz henuz yok.",
+                "advice": human_move_advice(
+                    quality=quality,
+                    label=analysis.quality_label if analysis else None,
+                    loss_cp=analysis.loss_cp if analysis else None,
+                    san=move.san,
+                    best_uci=best,
+                    played_uci=move.uci,
+                    phase=move.phase,
+                    eval_before_cp=analysis.eval_before_cp if analysis else None,
+                    eval_after_cp=analysis.eval_after_cp if analysis else None,
+                ) if analysis and analysis.loss_cp is not None else "Bu hamle için analiz henüz tamamlanmadı. Motor verisi geldiğinde sana net bir koç notu çıkaracağım.",
                 "tactic": "Motor onerisi ve karar kalitesi",
                 "plan": "Aday hamleleri sirala: sah cekme, alma, tehdit. Sonra en temiz plana don.",
                 "highlights": [],
@@ -177,6 +199,89 @@ def analyze(game_id: int, payload: AnalyzeRequest):
             )
         except StockfishUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc))
+
+
+
+@router.post("/games/analyze-all")
+def analyze_all(payload: AnalyzeAllRequest):
+    with db() as session:
+        depth = payload.depth or (DEEP_DEPTH if payload.deep else DEFAULT_DEPTH)
+        time_limit = payload.time_limit or (DEEP_ENGINE_TIME_LIMIT if payload.deep else ENGINE_TIME_LIMIT)
+        if payload.deep:
+            depth = min(depth, 14)
+            passes = min(payload.passes, 2)
+            time_limit = min(time_limit, 0.45)
+        else:
+            depth = min(depth, 11)
+            passes = min(payload.passes, 1)
+            time_limit = min(time_limit, 0.28)
+
+        pending_condition = or_(
+            Analysis.id.is_(None),
+            Analysis.loss_cp.is_(None),
+            Analysis.depth < depth,
+        )
+
+        game_stmt = (
+            select(Game)
+            .join(Move, Move.game_id == Game.id)
+            .outerjoin(Analysis, Analysis.move_id == Move.id)
+            .where(pending_condition)
+            .order_by(func.coalesce(Game.end_time, 0).desc(), Game.id.desc())
+            .distinct()
+            .limit(payload.max_games)
+        )
+        if payload.owner_username:
+            game_stmt = game_stmt.where(Game.owner_username == payload.owner_username)
+
+        games_to_analyze = session.execute(game_stmt).scalars().all()
+        processed_games = []
+        total_processed_moves = 0
+
+        try:
+            for game in games_to_analyze:
+                result = analyze_game(
+                    session,
+                    game.id,
+                    depth=depth,
+                    passes=passes,
+                    time_limit=time_limit,
+                    force=payload.force,
+                    max_moves=payload.max_moves_per_game,
+                )
+                processed_games.append({
+                    "gameId": game.id,
+                    "title": game_title(game),
+                    **result,
+                })
+                total_processed_moves += int(result.get("processed") or 0)
+        except StockfishUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+
+        remaining_stmt = (
+            select(func.count(Move.id))
+            .outerjoin(Analysis, Analysis.move_id == Move.id)
+            .join(Game, Game.id == Move.game_id)
+            .where(pending_condition)
+        )
+        if payload.owner_username:
+            remaining_stmt = remaining_stmt.where(Game.owner_username == payload.owner_username)
+
+        remaining_moves = session.execute(remaining_stmt).scalar_one()
+
+        return {
+            "status": "done" if remaining_moves == 0 else "partial",
+            "processedGames": processed_games,
+            "processedMoves": total_processed_moves,
+            "remainingMoves": remaining_moves,
+            "coachSummary": build_coach_summary(session, payload.owner_username),
+        }
+
+
+@router.get("/coach/summary")
+def coach_summary(owner_username: str | None = None):
+    with db() as session:
+        return build_coach_summary(session, owner_username)
 
 
 @router.post("/analyze-move")

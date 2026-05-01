@@ -3,9 +3,11 @@ import logging
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
 
 from app.core.config import CHESSCOM_USER_AGENT, MAX_PGN_BYTES
 from app.core.db import db
+from app.models import Game
 from app.repositories.games import insert_game, replace_moves
 from app.services.pgn_importer import parse_pgn_moves, pgn_headers
 
@@ -36,6 +38,7 @@ class ChesscomSyncRequest(BaseModel):
     owner_username: str | None = Field(default=None, max_length=80)
     max_archives: int | None = Field(default=None, ge=1, le=600)
     all_archives: bool = True
+    new_only: bool = True
 
     @field_validator("username")
     @classmethod
@@ -137,7 +140,10 @@ async def sync_chesscom(payload: ChesscomSyncRequest):
         )
 
     imported = 0
+    imported_new = 0
+    updated_existing = 0
     skipped = 0
+    skipped_existing = 0
     failed = []
 
     try:
@@ -154,10 +160,29 @@ async def sync_chesscom(payload: ChesscomSyncRequest):
                         skipped += 1
                         continue
 
+                    link = game.get("url") or parsed_headers.get("Link") or parsed_headers.get("Site")
+                    existing = None
+                    if link:
+                        existing = session.execute(select(Game).where(Game.chesscom_url == link)).scalar_one_or_none()
+
+                    existing_same = existing is not None and existing.pgn == pgn
+                    if existing_same and payload.new_only:
+                        skipped_existing += 1
+                        continue
+
                     game_id = insert_game(session, owner_username, pgn, parsed_headers, game.get("url"))
+
+                    if existing_same:
+                        skipped_existing += 1
+                        continue
+
                     moves = parse_pgn_moves(game_id, pgn)
                     replace_moves(session, game_id, moves)
                     imported += 1
+                    if existing is None:
+                        imported_new += 1
+                    else:
+                        updated_existing += 1
                 except Exception as exc:
                     failed.append({
                         "index": index,
@@ -172,7 +197,11 @@ async def sync_chesscom(payload: ChesscomSyncRequest):
                 "archives_checked": len(archive_urls),
                 "games_seen": len(games),
                 "imported": imported,
+                "imported_new": imported_new,
+                "updated_existing": updated_existing,
                 "skipped": skipped,
+                "skipped_existing": skipped_existing,
+                "new_only": payload.new_only,
                 "failed_count": len(failed),
                 "failed_first_5": failed[:5],
             }

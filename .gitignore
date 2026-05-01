@@ -15,3 +15,6 @@ frontend/dist/
 backups/
 
 tools/stockfish/*.exe
+artifacts/
+*.apk
+tools/stockfish/stockfish.exe

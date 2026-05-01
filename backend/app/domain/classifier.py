@@ -1,5 +1,7 @@
 import chess
 
+from app.domain.coach import human_move_advice
+
 PIECE_VALUES = {
     chess.PAWN: 100,
     chess.KNIGHT: 320,
@@ -150,23 +152,13 @@ def move_context(san, best_uci, played_uci, fen_before, fen_after):
     return "; ".join(details[:4])
 
 
+
 def build_explanation(base, loss, san, best_uci, played_uci, fen_before, fen_after, side, eval_before_cp, eval_after_cp):
-    side_bool = normalize_side(side)
-    before = eval_for_side(eval_before_cp, side_bool)
-    after = eval_for_side(eval_after_cp, side_bool)
+    # Keep a concise technical trace for data consumers, but return the user-facing
+    # advice in a more human, coach-like tone. The frontend also enriches this.
     context = move_context(san, best_uci, played_uci, fen_before, fen_after)
-
-    parts = [base]
-    if before is not None and after is not None:
-        parts.append(
-            f"Taraf perspektifinde eval {before / 100:+.2f}'den {after / 100:+.2f}'ye gitti; kayip {loss / 100:.2f} piyon."
-        )
-    if best_uci and played_uci and best_uci != played_uci:
-        parts.append(f"Daha temiz aday {best_uci}; oynanan {played_uci} ayni kaliteyi koruyamadi.")
-    if context:
-        parts.append(f"Pozisyon izi: {context}.")
-    return " ".join(parts)
-
+    technical_tail = f" Teknik iz: {context}." if context else ""
+    return f"{base}{technical_tail}"
 
 def classify_move(
     loss_cp,
@@ -181,7 +173,7 @@ def classify_move(
     analyzed=True,
 ):
     if not analyzed or loss_cp is None:
-        return "book", "Analiz yok", 0.0, "Bu hamle icin motor analizi henuz yok."
+        return "book", "Analiz yok", 0.0, "Bu hamle için motor analizi henüz yok. Analiz gelince sana net, uygulanabilir bir koç notu vereceğim."
 
     loss = max(0.0, float(loss_cp))
 

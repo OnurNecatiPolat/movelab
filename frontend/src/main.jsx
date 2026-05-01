@@ -313,6 +313,7 @@ function App() {
   const [apiStatus, setApiStatus] = useState("loading");
   const [systemStatus, setSystemStatus] = useState(null);
   const [platformStats, setPlatformStats] = useState({games: 0, moves: 0, analyses: 0});
+  const [coachSummary, setCoachSummary] = useState(null);
   const [billingCatalog, setBillingCatalog] = useState(EMPTY_BILLING);
   const [games, setGames] = useState([]);
   const [gameId, setGameId] = useState(null);
@@ -348,12 +349,14 @@ function App() {
       setSystemStatus(health);
       setApiStatus("connected");
 
-      const [overviewResult, billingResult] = await Promise.allSettled([
+      const [overviewResult, billingResult, coachResult] = await Promise.allSettled([
         getJson("/api/platform/overview"),
         getJson("/api/billing/catalog"),
+        getJson("/api/coach/summary"),
       ]);
       if (overviewResult.status === "fulfilled") setPlatformStats(overviewResult.value);
       if (billingResult.status === "fulfilled") setBillingCatalog(billingResult.value);
+      if (coachResult.status === "fulfilled") setCoachSummary(coachResult.value);
     } catch (error) {
       setApiStatus("offline");
       if (!isNetworkApiError(error)) {
@@ -481,6 +484,84 @@ function App() {
     }
   }
 
+
+  async function analyzeAllGames() {
+    setBusy(true);
+    setMessage("Tüm oyunlar için derin analiz kuyruğu başladı. Railway süre sınırına takılmamak için parça parça ilerleyeceğim.");
+    setAnalysisProgress({
+      active: true,
+      label: "Toplu derin analiz çalışıyor",
+      percent: 0,
+      analyzed: 0,
+      total: 0,
+    });
+
+    try {
+      let guard = 0;
+      let result = null;
+      do {
+        result = await postJson("/api/games/analyze-all", {
+          deep: true,
+          passes: 2,
+          depth: 14,
+          time_limit: 0.42,
+          max_games: 4,
+          max_moves_per_game: 10,
+          force: false,
+        });
+        guard += 1;
+        const processed = result.processedMoves || 0;
+        const remaining = result.remainingMoves || 0;
+        const percent = processed + remaining > 0 ? Math.round((processed / (processed + remaining)) * 100) : 100;
+        setAnalysisProgress({
+          active: true,
+          label: "Toplu derin analiz çalışıyor",
+          percent: Math.min(99, percent),
+          analyzed: processed,
+          total: processed + remaining,
+        });
+        if (result.coachSummary) setCoachSummary(result.coachSummary);
+        await Promise.all([loadGames(), loadHealth()]);
+      } while (result?.remainingMoves > 0 && guard < 50);
+
+      setAnalysisProgress((current) => current ? {...current, percent: 100, label: "Toplu analiz tamamlandı"} : null);
+      setMessage(result?.remainingMoves > 0
+        ? `${result.remainingMoves} hamle kaldı. Devam etmek için "Tüm oyunları derin analiz et" butonuna tekrar bas.`
+        : "Tüm oyunlar derin analizden geçti. Koç raporunu güncelledim.");
+    } catch (error) {
+      setMessage(uiError(error, "Toplu derin analiz başarısız oldu."));
+    } finally {
+      setBusy(false);
+      setTimeout(() => setAnalysisProgress(null), 1200);
+    }
+  }
+
+  async function syncNewAndAnalyze() {
+    if (!syncForm.username.trim()) {
+      setMessage("Yeni oyunları çekmek için Chess.com kullanıcı adı gerekli.");
+      return;
+    }
+
+    setBusy(true);
+    setMessage("Sadece yeni oyunlar aranıyor. Eski oyunlara dokunmayacağım.");
+    try {
+      const result = await postJson("/api/import/chesscom", {
+        username: syncForm.username.trim(),
+        owner_username: syncForm.ownerUsername.trim() || syncForm.username.trim(),
+        all_archives: Boolean(syncForm.allArchives),
+        max_archives: syncForm.allArchives ? null : Number(syncForm.maxArchives || 12),
+        new_only: true,
+      });
+      await Promise.all([loadGames(), loadHealth()]);
+      setMessage(`${result.imported_new ?? result.imported ?? 0} yeni oyun eklendi; ${result.skipped_existing ?? 0} eski oyun atlandı. Şimdi otomatik derin analiz başlatılıyor.`);
+      await analyzeAllGames();
+    } catch (error) {
+      setMessage(uiError(error, "Yeni oyun senkronizasyonu başarısız."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleMove(from, to) {
     if (!free) return;
 
@@ -521,9 +602,10 @@ function App() {
         owner_username: syncForm.ownerUsername.trim() || syncForm.username.trim(),
         all_archives: Boolean(syncForm.allArchives),
         max_archives: syncForm.allArchives ? null : Number(syncForm.maxArchives || 12),
+        new_only: true,
       });
       await refreshAll();
-      setMessage(`${result.imported} oyun içe aktarıldı. ${result.archives_checked} arşiv tarandı${result.failed_count ? `, ${result.failed_count} oyun raporlandı.` : "."}`);
+      setMessage(`${result.imported_new ?? result.imported} yeni oyun eklendi. ${result.skipped_existing ?? 0} eski oyun atlandı. ${result.archives_checked} arşiv tarandı${result.failed_count ? `, ${result.failed_count} oyun raporlandı.` : "."}`);
     } catch (error) {
       setMessage(uiError(error, "Chess.com senkronizasyonu başarısız."));
     } finally {
@@ -731,6 +813,7 @@ function App() {
               handleMove={handleMove}
               hasGames={games.length > 0}
               setPage={setPage}
+              coachSummary={coachSummary}
             />
           )}
 
@@ -745,6 +828,9 @@ function App() {
               setPgnForm={setPgnForm}
               syncChesscom={syncChesscom}
               importPgn={importPgn}
+              syncNewAndAnalyze={syncNewAndAnalyze}
+              analyzeAllGames={analyzeAllGames}
+              coachSummary={coachSummary}
             />
           )}
 
@@ -786,7 +872,7 @@ function ReviewPage(props) {
     positions, reviewPositions, pos, compare, active,
     idx, setIdx, cmp, setCmp, free, setFree, freePos,
     setFreePos, freeIdx, setFreeIdx, shadow, setShadow,
-    handleMove, hasGames, setPage,
+    handleMove, hasGames, setPage, coachSummary,
   } = props;
 
   const analyzed = game.analysisStatus?.analyzedMoves ?? positions.filter((item) => item.isAnalyzed).length;
@@ -802,6 +888,8 @@ function ReviewPage(props) {
         <Stat icon={ShieldCheck} label="Analiz kapsaması" value={`${coverage}%`} tone="lime" />
         <Stat icon={GitBranch} label="Çalışma modu" value={free ? "Varyant" : "Ana hat"} tone="rose" />
       </div>
+
+      {coachSummary && <CoachSummaryPanel summary={coachSummary} />}
 
       <Card cls="card-pad hero-card">
         <div className="hero-grid">
@@ -895,6 +983,7 @@ function ReviewPage(props) {
           </Card>
 
           <Momentum positions={reviewPositions} active={idx} onSelect={(next) => { setFree(false); setIdx(next); setCmp(next); }} />
+          <MoveQualityChart positions={reviewPositions} active={idx} onSelect={(next) => { setFree(false); setIdx(next); setCmp(next); }} />
 
           {free && (
             <Card cls="card-pad">
@@ -970,6 +1059,66 @@ function ReviewPage(props) {
         }}
       />
     </div>
+  );
+}
+
+
+function CoachSummaryPanel({summary}) {
+  if (!summary) return null;
+  const total = Number(summary.wins || 0) + Number(summary.losses || 0) + Number(summary.draws || 0);
+  return (
+    <Card cls="card-pad coach-summary-card">
+      <div className="split-head">
+        <div>
+          <div className="eyebrow">Profesyonel koç özeti</div>
+          <strong>Genel performans ve çalışma reçetesi</strong>
+        </div>
+        <Badge>{total ? `${summary.winRate ?? 0}% win` : "Analiz bekliyor"}</Badge>
+      </div>
+
+      <div className="coach-summary-grid">
+        <div className="coach-score-tile win">
+          <span>Win</span>
+          <strong>{summary.wins || 0}</strong>
+        </div>
+        <div className="coach-score-tile loss">
+          <span>Lose</span>
+          <strong>{summary.losses || 0}</strong>
+        </div>
+        <div className="coach-score-tile draw">
+          <span>Draw</span>
+          <strong>{summary.draws || 0}</strong>
+        </div>
+      </div>
+
+      <div className="coach-note">
+        <p>{summary.coachNote}</p>
+        <p>{summary.encouragement}</p>
+      </div>
+
+      <div className="study-plan-grid">
+        {(summary.studyPlan || []).map((item) => (
+          <div key={`${item.title}-${item.duration}`} className="study-plan-card">
+            <span>{item.duration}</span>
+            <strong>{item.title}</strong>
+            <p>{item.text}</p>
+          </div>
+        ))}
+      </div>
+
+      {!!summary.criticalMoments?.length && (
+        <div className="critical-list">
+          <div className="small">Öncelikli tekrar pozisyonları</div>
+          {summary.criticalMoments.slice(0, 4).map((item) => (
+            <div key={`${item.gameId}-${item.moveId}`} className="critical-item">
+              <span>{item.move}</span>
+              <strong>{qLabel(item.quality)} · {(item.lossCp / 100).toFixed(2)} piyon</strong>
+              <small>{item.title}</small>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -1104,7 +1253,7 @@ function ReviewDetailsDrawer({
   );
 }
 
-function StudioPage({systemStatus, platformStats, busy, syncForm, setSyncForm, pgnForm, setPgnForm, syncChesscom, importPgn}) {
+function StudioPage({systemStatus, platformStats, busy, syncForm, setSyncForm, pgnForm, setPgnForm, syncChesscom, importPgn, syncNewAndAnalyze, analyzeAllGames, coachSummary}) {
   return (
     <div className="page-grid">
       <Card cls="card-pad section-header">
@@ -1137,10 +1286,20 @@ function StudioPage({systemStatus, platformStats, busy, syncForm, setSyncForm, p
             </>
           )}
           <div className="spacer-12" />
-          <Button cls="btn-dark" disabled={busy} onClick={syncChesscom} title="Chess.com senkronizasyonunu başlat">
-            {busy ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
-            Oyunları veritabanına çek
-          </Button>
+          <div className="action-stack">
+            <Button cls="btn-dark" disabled={busy} onClick={syncChesscom} title="Sadece yeni oyunları içe aktar">
+              {busy ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
+              Sadece yeni oyunları çek
+            </Button>
+            <Button cls="btn-emerald" disabled={busy} onClick={syncNewAndAnalyze} title="Yeni oyunları ekle ve otomatik derin analiz başlat">
+              <WandSparkles size={16} />
+              Yeni oyunları çek + derin analiz et
+            </Button>
+            <Button cls="btn-violet" disabled={busy} onClick={analyzeAllGames} title="Tüm oyun havuzunu derin analiz kuyruğuna al">
+              <LineChart size={16} />
+              Tüm oyunları derin analiz et
+            </Button>
+          </div>
         </Card>
 
         <Card cls="card-pad">
@@ -1172,6 +1331,8 @@ function StudioPage({systemStatus, platformStats, busy, syncForm, setSyncForm, p
         <Stat icon={ShieldCheck} label="Database" value={systemStatus?.database?.backend || "-"} tone="amber" />
         <Stat icon={Activity} label="Engine" value={systemStatus?.stockfish?.available ? "Ready" : "Missing"} tone="teal" />
       </div>
+
+      {coachSummary && <CoachSummaryPanel summary={coachSummary} />}
 
       <div className="idea-grid">
         <IdeaCard
@@ -1642,30 +1803,47 @@ function Notation({positions, active, onSelect, cmp, setCmp}) {
   );
 }
 
+
 function coachInsights(pos, delta) {
   const loss = Number(pos.loss || 0);
   const played = pos.played || "-";
   const best = pos.best || "-";
   const quality = pos.quality || "analysis";
-  const tacticalLine = pos.tactic || "Taktik tema netleşmedi.";
-  const planLine = pos.plan || "Taş aktivitesini artır, şah güvenliğini koru ve zorunlu hamleleri önce kontrol et.";
+  const evalPhrase = delta >= 0
+    ? `seçili kıyas noktasına göre ${(delta / 100).toFixed(2)} piyon daha rahat görünüyorsun`
+    : `seçili kıyas noktasına göre ${Math.abs(delta / 100).toFixed(2)} piyonluk baskı kaybı var`;
 
-  const priority = quality === "blunder" || loss >= 220
-    ? "Önce zorunlu hamleleri ara: şah çekme, taş alma ve doğrudan tehditleri tek tek ele."
+  const qualityVoice = {
+    brilliant: "Burada yaratıcı bir fikir var. Bunu 'şans eseri güzel hamle' diye geçme; hamlen forcing olduğu için rakibi karar vermeye zorluyor.",
+    best: "Bu hamle sade ve olgun. Gereksiz atraksiyon yok; pozisyon ne istiyorsa onu yapmışsın.",
+    excellent: "Güçlü karar. Taşların uyumu ve plan devamlılığı korunuyor.",
+    good: "Hamle oynanabilir. Bir sonraki seviyeye çıkmak için burada ikinci adayı da tartmanı isterdim.",
+    inaccuracy: "Bu küçük bir tempo/koordinasyon kaybı. Büyük sorun değil; tekrar eden bir alışkanlıksa puan kaçırır.",
+    wrong: "Burada planın yönü biraz kaymış. Pozisyonu hemen çöpe atmıyor ama seni savunma moduna itebilir.",
+    mistake: "Bu hamle kritik bir karar kalitesi kaybı yaratıyor. Panik yok; bu tip hatalar net kontrol listesiyle azalır.",
+    blunder: "Burada taktik güvenlik alarmı çalıyor. Önce şah çekme, alma ve tehditleri kontrol etmeliydin.",
+    missed: "Burada fırsat vardı. İyi haber: pozisyona ulaşmışsın; şimdi o avantajı dönüştürmeyi çalışacağız.",
+  }[quality] || "Bu pozisyon için motor verisini insan diliyle sadeleştiriyorum.";
+
+  const prescription = quality === "blunder" || loss >= 220
+    ? "Bir sonraki 10 oyunda her hamleden önce CCT kontrolü yap: şah çekme, alma, tehdit."
     : quality === "mistake" || loss >= 110
-      ? "Aday hamleleri en az iki hamle ileri kıyasla; yalnızca ilk fikre güvenme."
+      ? "Aday hamle disiplinine odaklan: ilk fikri değil, en az üç adayı masaya koy."
       : quality === "missed"
-        ? "Pozisyonda fırsat vardı; en aktif taşını ve rakibin zayıf karesini birlikte düşün."
-        : "Karar yapısı iyi; aynı planı tempo kaybetmeden devam ettirmeye çalış.";
+        ? "Avantajlı pozisyonlarda en aktif taşını ve forcing hamleleri önce ara."
+        : quality === "inaccuracy"
+          ? "Küçük tempo kayıplarını azalt: gelişim, merkez ve şah güvenliği üçlüsünü bozma."
+          : "Bu karar modelini sakla: sade plan, düşük risk, net amaç.";
 
   return [
-    ["Oynanan hamle", `${played} hamlesi pozisyonu ${qLabel(quality).toLowerCase()} sınıfına taşıyor.`],
-    ["Daha güçlü fikir", `${best} daha güvenli aday. Eval farkı ${delta >= 0 ? "+" : ""}${(delta / 100).toFixed(2)} olarak okunuyor.`],
-    ["Neden", tacticalLine],
-    ["Plan", planLine],
-    ["Antrenman odağı", priority],
+    ["Koç yorumu", qualityVoice],
+    ["Oynanan hamle", `${played} hamlesinin ana etkisi: ${pos.advice || "pozisyonun dengesini değiştiriyor."}`],
+    ["Daha temiz aday", best && best !== "-" ? `${best} fikrini ayrıca incele; burada motorun önerisi sana planın en sade yolunu gösteriyor.` : "Bu pozisyonda net bir alternatif verisi yok."],
+    ["Kıyas", `${evalPhrase}.`],
+    ["Çalışma reçetesi", prescription],
   ];
 }
+
 
 function Coach({pos, compare, shadow, setShadow}) {
   const delta = Number(pos.evalCp || 0) - Number(compare.evalCp || 0);
@@ -1793,6 +1971,66 @@ function Momentum({positions, active, onSelect}) {
           <strong>{previousPoint ? evalText(swing) : "0.0"}</strong>
           <span className="tiny">{focusPoint?.position?.move || "-"}</span>
         </div>
+      </div>
+    </Card>
+  );
+}
+
+
+function MoveQualityChart({positions, active, onSelect}) {
+  const rows = positions
+    .map((position, index) => ({
+      position,
+      index,
+      loss: Math.min(360, Number(position.loss || 0)),
+      quality: position.quality || "book",
+    }))
+    .filter((item) => item.index > 0);
+
+  const maxLoss = Math.max(60, ...rows.map((item) => item.loss));
+  const buckets = rows.reduce((acc, item) => {
+    acc[item.quality] = (acc[item.quality] || 0) + 1;
+    return acc;
+  }, {});
+
+  return (
+    <Card cls="card-pad move-quality-card">
+      <div className="split-head">
+        <div>
+          <strong>Hamle analiz grafiği</strong>
+          <div className="small">Her bar centipawn kaybını ve karar kalitesini gösterir. Tıklayınca tahta o hamleye gider.</div>
+        </div>
+        <Badge>{rows.length} hamle</Badge>
+      </div>
+
+      <div className="quality-buckets">
+        {Object.entries(buckets).map(([quality, count]) => (
+          <span key={quality} className={`quality-chip quality-${quality}`}>{qLabel(quality)} · {count}</span>
+        ))}
+      </div>
+
+      <div className="loss-timeline">
+        {rows.map(({position, index, loss, quality}) => {
+          const height = 14 + (loss / maxLoss) * 92;
+          return (
+            <button
+              key={`${position.ply || index}-${index}`}
+              type="button"
+              className={cx("loss-bar", `loss-${quality}`, active === index && "active")}
+              style={{height: `${height}px`}}
+              title={`${position.move} · ${qLabel(quality)} · ${(Number(position.loss || 0) / 100).toFixed(2)} piyon`}
+              onClick={() => onSelect(index)}
+            >
+              <span>{index}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="chart-legend">
+        <span><i className="legend-good" /> Sağlıklı karar</span>
+        <span><i className="legend-warning" /> Çalışılacak karar</span>
+        <span><i className="legend-danger" /> Kritik kırılma</span>
       </div>
     </Card>
   );
