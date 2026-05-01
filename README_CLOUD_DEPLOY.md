@@ -40,6 +40,8 @@ MOVELAB_ENGINE_TIME=0.45
 MOVELAB_DEEP_ENGINE_TIME=0.80
 ```
 
+Railway backend servisine root `.env.example` dosyasini topluca import etme. O dosyada local Windows gelistirme degerleri vardir; Railway'de `127.0.0.1`, `tools/stockfish/stockfish.exe` veya `VITE_API_BASE` backend variable'i olarak kalmamalidir.
+
 Backend public URL ornegi:
 
 ```text

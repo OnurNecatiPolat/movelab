@@ -69,6 +69,7 @@ def _candidate_paths():
                 candidates.extend(base.rglob("stockfish*.exe"))
     else:
         candidates.extend([
+            Path("/usr/games/stockfish"),
             Path("/usr/bin/stockfish"),
             Path("/usr/local/bin/stockfish"),
             PACKAGE_ROOT / "tools" / "stockfish" / "stockfish",
