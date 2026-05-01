@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 try:
     from dotenv import load_dotenv
@@ -30,7 +31,31 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 LEGACY_SQLITE_PATH = env_path("MOVELAB_DB", DATA_DIR / "movelab.sqlite")
 DEFAULT_DATABASE_URL = f"sqlite:///{LEGACY_SQLITE_PATH.as_posix()}"
-DATABASE_URL = os.getenv("MOVELAB_DATABASE_URL", DEFAULT_DATABASE_URL)
+
+
+def normalize_database_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        url = "postgresql+psycopg://" + url.removeprefix("postgres://")
+    elif url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url.removeprefix("postgresql://")
+
+    if not url.startswith("postgresql+psycopg://"):
+        return url
+
+    parsed = urlsplit(url)
+    sslmode = os.getenv("MOVELAB_DATABASE_SSLMODE")
+    needs_railway_ssl = parsed.hostname and parsed.hostname.endswith(".proxy.rlwy.net")
+    if not sslmode and not needs_railway_ssl:
+        return url
+
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query.setdefault("sslmode", sslmode or "require")
+    return urlunsplit(parsed._replace(query=urlencode(query)))
+
+
+DATABASE_URL = normalize_database_url(
+    os.getenv("MOVELAB_DATABASE_URL") or os.getenv("DATABASE_URL") or DEFAULT_DATABASE_URL
+)
 DATABASE_BACKEND = "postgresql" if DATABASE_URL.startswith("postgresql") else "sqlite"
 IS_SQLITE = DATABASE_BACKEND == "sqlite"
 
