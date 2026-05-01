@@ -78,6 +78,8 @@ const EMPTY_GAME = {
   timeControl: "ready",
   userAccuracy: null,
   opponentAccuracy: null,
+  whiteAccuracy: null,
+  blackAccuracy: null,
   userColor: null,
   analysisStatus: {totalMoves: 0, analyzedMoves: 0},
 };
@@ -100,6 +102,15 @@ function tokenHeaders(token) {
   return token ? {Authorization: `Bearer ${token}`} : {};
 }
 
+class ApiError extends Error {
+  constructor(message, status, payload) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 function errorMessage(payload, fallback = "İstek tamamlanamadı.") {
   if (!payload) return fallback;
   if (typeof payload === "string") return payload;
@@ -116,7 +127,7 @@ async function getJson(path, token) {
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    throw new Error(errorMessage(payload, `${response.status} ${response.statusText}`));
+    throw new ApiError(errorMessage(payload, `${response.status} ${response.statusText}`), response.status, payload);
   }
   return response.json();
 }
@@ -135,7 +146,7 @@ async function postJson(path, payload = {}, token) {
     } catch {
       data = null;
     }
-    throw new Error(errorMessage(data, text || `${response.status}`));
+    throw new ApiError(errorMessage(data, text || `${response.status}`), response.status, data);
   }
   return text ? JSON.parse(text) : {};
 }
@@ -147,6 +158,14 @@ function cx(...classes) {
 function fmtAcc(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   return `${Number(value).toFixed(1)}%`;
+}
+
+function numericAcc(value) {
+  return value === null || value === undefined || Number.isNaN(Number(value)) ? 0 : Number(value);
+}
+
+function coveragePct(analyzed, total) {
+  return total > 0 ? Math.round((Number(analyzed || 0) / total) * 100) : 0;
 }
 
 function evalText(cp) {
@@ -257,15 +276,16 @@ function App() {
 
   async function loadHealth() {
     try {
-      const [health, overview, billing] = await Promise.all([
-        getJson("/api/health"),
+      const health = await getJson("/api/health");
+      setSystemStatus(health);
+      setApiStatus("connected");
+
+      const [overviewResult, billingResult] = await Promise.allSettled([
         getJson("/api/platform/overview"),
         getJson("/api/billing/catalog"),
       ]);
-      setSystemStatus(health);
-      setPlatformStats(overview);
-      setBillingCatalog(billing);
-      setApiStatus("connected");
+      if (overviewResult.status === "fulfilled") setPlatformStats(overviewResult.value);
+      if (billingResult.status === "fulfilled") setBillingCatalog(billingResult.value);
     } catch (error) {
       setApiStatus("offline");
       setMessage(error.message || "Backend bağlantısı kurulamadı.");
@@ -316,9 +336,13 @@ function App() {
       setUser(data.user);
       setSyncForm((current) => ({...current, username: current.username || data.user?.chesscomUsername || ""}));
       setPgnForm((current) => ({...current, ownerUsername: current.ownerUsername || data.user?.username || ""}));
-    } catch {
-      setToken(null);
-      setUser(null);
+    } catch (error) {
+      if (error.status === 401 || error.status === 403) {
+        setToken(null);
+        setUser(null);
+      } else {
+        setMessage(error.message || "Oturum kontrolü geçici olarak doğrulanamadı.");
+      }
     }
   }
 
@@ -333,17 +357,23 @@ function App() {
     }
 
     setBusy(true);
-    setMessage(deep ? "Derin analiz kuyruğu çalışıyor." : "Analiz başlatıldı.");
+    setMessage(deep ? "Derin analiz partisi çalışıyor." : "Hızlı analiz başlatıldı.");
 
     try {
-      await postJson(`/api/games/${gameId}/analyze`, {
-        force: deep,
+      const result = await postJson(`/api/games/${gameId}/analyze`, {
+        force: false,
         deep,
-        passes: deep ? 4 : 3,
-        depth: deep ? 16 : 12,
+        passes: deep ? 2 : 1,
+        depth: deep ? 14 : 10,
+        time_limit: deep ? 0.35 : 0.22,
+        max_moves: deep ? 10 : 24,
       });
       await Promise.all([loadReview(gameId), loadHealth()]);
-      setMessage("Analiz tamamlandı.");
+      setMessage(
+        result.remaining > 0
+          ? `${result.processed} hamle işlendi. ${result.remaining} hamle kaldı; devam etmek için analizi tekrar çalıştır.`
+          : "Analiz tamamlandı."
+      );
     } catch (error) {
       setMessage(error.message || "Analiz sırasında hata oluştu.");
     } finally {
@@ -654,14 +684,15 @@ function ReviewPage(props) {
 
   const analyzed = game.analysisStatus?.analyzedMoves ?? positions.filter((item) => item.isAnalyzed).length;
   const total = game.analysisStatus?.totalMoves ?? Math.max(0, positions.length - 1);
+  const coverage = coveragePct(analyzed, total);
 
   return (
     <div className="page-grid review-page">
       <div className="stats">
-        <Stat icon={Gauge} label="Benim doğruluk" value={fmtAcc(game.userAccuracy)} tone="cyan" />
-        <Stat icon={BarChart3} label="Rakip doğruluk" value={fmtAcc(game.opponentAccuracy)} tone="amber" />
+        <Stat icon={Gauge} label="Beyaz doğruluk" value={fmtAcc(game.whiteAccuracy)} tone="cyan" />
+        <Stat icon={BarChart3} label="Siyah doğruluk" value={fmtAcc(game.blackAccuracy)} tone="amber" />
         <Stat icon={Database} label="Oyun havuzu" value={`${games.length}`} tone="teal" />
-        <Stat icon={ShieldCheck} label="Analiz kapsaması" value={`${analyzed}/${total}`} tone="lime" />
+        <Stat icon={ShieldCheck} label="Analiz kapsaması" value={`${coverage}%`} tone="lime" />
         <Stat icon={GitBranch} label="Çalışma modu" value={free ? "Varyant" : "Ana hat"} tone="rose" />
       </div>
 
@@ -672,8 +703,9 @@ function ReviewPage(props) {
             <h1 className="title">{game.title}</h1>
             <p className="hero-copy">{game.opening || "Açılış bilgisi yok"} · {game.timeClass || "-"} · {game.timeControl || "-"}</p>
             <div className="hero-badges">
-              <Badge>Ben {fmtAcc(game.userAccuracy)}</Badge>
-              <Badge>Rakip {fmtAcc(game.opponentAccuracy)}</Badge>
+              <Badge>Beyaz {fmtAcc(game.whiteAccuracy)}</Badge>
+              <Badge>Siyah {fmtAcc(game.blackAccuracy)}</Badge>
+              <Badge>Kapsam {analyzed}/{total}</Badge>
               <Badge>{game.result || "Sonuç yok"}</Badge>
             </div>
           </div>
@@ -683,7 +715,7 @@ function ReviewPage(props) {
               {!games.length && <option value="">Henüz oyun yok</option>}
               {games.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.title} · Ben {fmtAcc(item.userAccuracy)} · Rakip {fmtAcc(item.opponentAccuracy)}
+                  {item.title} · Beyaz {fmtAcc(item.whiteAccuracy)} · Siyah {fmtAcc(item.blackAccuracy)}
                 </option>
               ))}
             </select>
@@ -691,11 +723,11 @@ function ReviewPage(props) {
             <div className="action-grid">
               <Button cls="btn-emerald" disabled={busy || !hasGames} onClick={() => analyze(false)} title="Seçili oyunu analiz et">
                 {busy ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
-                3-pass analiz
+                Hızlı analiz
               </Button>
               <Button cls="btn-violet" disabled={busy || !hasGames} onClick={() => analyze(true)} title="Derin analiz çalıştır">
                 <WandSparkles size={16} />
-                Derin analiz
+                Derin parti
               </Button>
               <Button
                 cls="btn-dark"
@@ -727,6 +759,8 @@ function ReviewPage(props) {
           </div>
         </div>
       </Card>
+
+      <AccuracyPanel game={game} analyzed={analyzed} total={total} />
 
       <div className="review-layout">
         <div className="board-column">
@@ -775,8 +809,8 @@ function ReviewPage(props) {
         open={detailsOpen}
         onClose={() => setDetailsOpen(false)}
         stats={{
-          userAccuracy: game.userAccuracy,
-          opponentAccuracy: game.opponentAccuracy,
+          whiteAccuracy: game.whiteAccuracy,
+          blackAccuracy: game.blackAccuracy,
           games: games.length,
           analyzed,
           total,
@@ -803,6 +837,51 @@ function ReviewPage(props) {
           setDetailsOpen(false);
         }}
       />
+    </div>
+  );
+}
+
+function AccuracyPanel({game, analyzed, total}) {
+  const coverage = coveragePct(analyzed, total);
+  const white = numericAcc(game.whiteAccuracy);
+  const black = numericAcc(game.blackAccuracy);
+  const leader = white === black ? "Denge" : white > black ? "Beyaz daha temiz oynadı" : "Siyah daha temiz oynadı";
+
+  return (
+    <Card cls="card-pad accuracy-panel">
+      <div className="split-head">
+        <div>
+          <div className="eyebrow">Doğruluk analizi</div>
+          <strong>{leader}</strong>
+        </div>
+        <Badge>{coverage}% kapsam</Badge>
+      </div>
+      <div className="accuracy-grid">
+        <AccuracyMeter label="Beyaz" value={game.whiteAccuracy} tone="white" />
+        <AccuracyMeter label="Siyah" value={game.blackAccuracy} tone="black" />
+        <div className="analysis-progress">
+          <div className="small">Analizlenen hamle</div>
+          <strong>{analyzed}/{total}</strong>
+          <div className="metric-track">
+            <div className="metric-fill" style={{width: `${coverage}%`}} />
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function AccuracyMeter({label, value, tone}) {
+  const width = Math.max(0, Math.min(100, numericAcc(value)));
+  return (
+    <div className={cx("accuracy-meter", `accuracy-${tone}`)}>
+      <div className="settings-line">
+        <span>{label}</span>
+        <strong>{fmtAcc(value)}</strong>
+      </div>
+      <div className="metric-track">
+        <div className="metric-fill" style={{width: `${width}%`}} />
+      </div>
     </div>
   );
 }
@@ -854,10 +933,10 @@ function ReviewDetailsDrawer({
 
             <div className="details-stack">
               <div className="stats details-stats">
-                <Stat icon={Gauge} label="Benim dogruluk" value={fmtAcc(stats.userAccuracy)} tone="green" />
-                <Stat icon={BarChart3} label="Rakip dogruluk" value={fmtAcc(stats.opponentAccuracy)} tone="amber" />
+                <Stat icon={Gauge} label="Beyaz dogruluk" value={fmtAcc(stats.whiteAccuracy)} tone="teal" />
+                <Stat icon={BarChart3} label="Siyah dogruluk" value={fmtAcc(stats.blackAccuracy)} tone="amber" />
                 <Stat icon={Database} label="Oyun havuzu" value={`${stats.games}`} tone="brown" />
-                <Stat icon={ShieldCheck} label="Analiz kapsami" value={`${stats.analyzed}/${stats.total}`} tone="lime" />
+                <Stat icon={ShieldCheck} label="Analiz kapsami" value={`${coveragePct(stats.analyzed, stats.total)}%`} tone="lime" />
                 <Stat icon={GitBranch} label="Calisma modu" value={stats.mode} tone="blue" />
               </div>
               <Notation positions={positions} active={active} onSelect={onSelect} cmp={cmp} setCmp={setCmp} />

@@ -6,18 +6,27 @@ from app.models import Analysis, Move
 from app.services.engine import StockfishService
 
 
-def analyze_game(session, game_id, depth=12, passes=3, time_limit=0.45, force=False):
+def analyze_game(session, game_id, depth=12, passes=3, time_limit=0.45, force=False, max_moves=None):
     moves = session.execute(
         select(Move).where(Move.game_id == game_id).order_by(Move.ply)
     ).scalars().all()
 
     total = len(moves)
     analyzed = 0
+    processed = 0
+    max_moves = max(1, int(max_moves)) if max_moves else None
 
     with StockfishService() as engine:
         for move in moves:
-            if move.analysis and not force:
+            already_analyzed = bool(move.analysis and move.analysis.loss_cp is not None)
+
+            if already_analyzed and not force:
                 analyzed += 1
+                continue
+
+            if max_moves is not None and processed >= max_moves:
+                if already_analyzed:
+                    analyzed += 1
                 continue
 
             board_before = chess.Board(move.fen_before)
@@ -68,6 +77,14 @@ def analyze_game(session, game_id, depth=12, passes=3, time_limit=0.45, force=Fa
             move.analysis.explanation = explanation
 
             analyzed += 1
+            processed += 1
             session.flush()
 
-    return {"status": "done", "total": total, "analyzed": analyzed}
+    remaining = max(0, total - analyzed)
+    return {
+        "status": "done" if remaining == 0 else "partial",
+        "total": total,
+        "analyzed": analyzed,
+        "processed": processed,
+        "remaining": remaining,
+    }

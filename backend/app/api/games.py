@@ -22,9 +22,10 @@ router = APIRouter(prefix="/api", tags=["games"])
 class AnalyzeRequest(BaseModel):
     force: bool = False
     depth: int | None = Field(default=None, ge=6, le=24)
-    passes: int = Field(default=3, ge=1, le=5)
+    passes: int = Field(default=2, ge=1, le=5)
     time_limit: float | None = Field(default=None, ge=0.1, le=3.0)
     deep: bool = False
+    max_moves: int | None = Field(default=None, ge=1, le=80)
 
 
 class MoveAnalyzeRequest(BaseModel):
@@ -153,15 +154,26 @@ def analyze(game_id: int, payload: AnalyzeRequest):
 
         depth = payload.depth or (DEEP_DEPTH if payload.deep else DEFAULT_DEPTH)
         time_limit = payload.time_limit or (DEEP_ENGINE_TIME_LIMIT if payload.deep else ENGINE_TIME_LIMIT)
+        if payload.deep:
+            depth = min(depth, 14)
+            passes = min(payload.passes, 2)
+            time_limit = min(time_limit, 0.45)
+            max_moves = payload.max_moves or 10
+        else:
+            depth = min(depth, 11)
+            passes = min(payload.passes, 1)
+            time_limit = min(time_limit, 0.28)
+            max_moves = payload.max_moves or 24
 
         try:
             return analyze_game(
                 session,
                 game_id,
                 depth=depth,
-                passes=payload.passes,
+                passes=passes,
                 time_limit=time_limit,
                 force=payload.force,
+                max_moves=max_moves,
             )
         except StockfishUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc))

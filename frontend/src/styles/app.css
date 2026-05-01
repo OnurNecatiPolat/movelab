@@ -334,6 +334,8 @@ textarea:focus-visible {
 .tone-teal { background: linear-gradient(135deg, #0f9d75, #14b8a6); }
 .tone-lime { background: linear-gradient(135deg, #65a30d, #84cc16); }
 .tone-rose { background: linear-gradient(135deg, #e11d48, #fb7185); }
+.tone-brown { background: linear-gradient(135deg, #8b5e34, #b7793f); }
+.tone-blue { background: linear-gradient(135deg, #2563eb, #0891b2); }
 
 .stat-value {
   font-size: 1.4rem;
@@ -708,6 +710,32 @@ textarea:focus-visible {
   background: linear-gradient(90deg, var(--cyan), var(--teal), var(--amber));
 }
 
+.accuracy-panel {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(238, 246, 229, 0.94));
+}
+
+.accuracy-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.accuracy-meter,
+.analysis-progress {
+  border-radius: 8px;
+  border: 1px solid rgba(44, 61, 35, 0.1);
+  background: rgba(255, 255, 255, 0.82);
+  padding: 14px;
+}
+
+.accuracy-white .metric-fill {
+  background: linear-gradient(90deg, #e7ecd8, #7fa650);
+}
+
+.accuracy-black .metric-fill {
+  background: linear-gradient(90deg, #6b7280, #25311f);
+}
+
 .cause-box {
   margin-top: 12px;
   padding: 14px;
@@ -932,7 +960,8 @@ textarea {
   .stats,
   .queue-grid,
   .info-grid,
-  .action-grid {
+  .action-grid,
+  .accuracy-grid {
     grid-template-columns: 1fr;
   }
 }
