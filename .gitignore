@@ -12,5 +12,6 @@ frontend/dist/
 
 .runtime/
 *.pyc
+backups/
 
 tools/stockfish/*.exe
