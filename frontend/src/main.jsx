@@ -89,6 +89,13 @@ const EMPTY_REVIEW = {
   positions: [EMPTY_POSITION],
 };
 
+const NETWORK_ERROR_NEEDLES = [
+  ["failed", "to", "fetch"].join(" "),
+  "networkerror",
+  "load failed",
+  "connection",
+];
+
 const EMPTY_BILLING = {
   provider: "manual",
   portalUrl: null,
@@ -125,17 +132,38 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchWithRetry(url, options = {}, attempts = 3) {
+function friendlyNetworkMessage(error) {
+  const text = String(error?.message || "").toLowerCase();
+  if (NETWORK_ERROR_NEEDLES.some((needle) => text.includes(needle))) {
+    return "Sunucuya ulaşılamadı. Bağlantı otomatik tekrar denendi; birkaç saniye sonra işlemi yeniden başlat.";
+  }
+  return error?.message || "Backend bağlantısı kurulamadı.";
+}
+
+function isTransientStatus(status) {
+  return [408, 425, 429, 500, 502, 503, 504].includes(Number(status));
+}
+
+function uiError(error, fallback = "İstek tamamlanamadı.") {
+  if (error?.status === 0) return friendlyNetworkMessage(error);
+  return error?.message || fallback;
+}
+
+async function fetchWithRetry(url, options = {}, attempts = 4) {
   let lastError = null;
+  let lastResponse = null;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      return await fetch(url, {mode: "cors", ...options});
+      const response = await fetch(url, {mode: "cors", cache: "no-store", ...options});
+      if (!isTransientStatus(response.status) || attempt === attempts) return response;
+      lastResponse = response;
     } catch (error) {
       lastError = error;
-      if (attempt < attempts) await sleep(450 * attempt);
     }
+    if (attempt < attempts) await sleep(650 * attempt);
   }
-  throw new ApiError(lastError?.message || "Backend bağlantısı kurulamadı.", 0, null);
+  if (lastResponse) return lastResponse;
+  throw new ApiError(friendlyNetworkMessage(lastError), 0, null);
 }
 
 async function getJson(path, token) {
@@ -311,7 +339,7 @@ function App() {
       if (billingResult.status === "fulfilled") setBillingCatalog(billingResult.value);
     } catch (error) {
       setApiStatus("offline");
-      setMessage(error.message || "Backend bağlantısı kurulamadı.");
+      setMessage(uiError(error, "Backend bağlantısı kurulamadı."));
     }
   }
 
@@ -327,7 +355,7 @@ function App() {
         }
       });
     } catch (error) {
-      setMessage(error.message || "Oyunlar yüklenemedi.");
+      setMessage(uiError(error, "Oyunlar yüklenemedi."));
     }
   }
 
@@ -348,7 +376,7 @@ function App() {
         setFreeIdx(0);
       });
     } catch (error) {
-      setMessage(error.message || "Review alınamadı.");
+      setMessage(uiError(error, "Review alınamadı."));
     }
   }
 
@@ -368,7 +396,7 @@ function App() {
         setToken(null);
         setUser(null);
       } else {
-        setMessage(error.message || "Oturum kontrolü geçici olarak doğrulanamadı.");
+        setMessage(uiError(error, "Oturum kontrolü geçici olarak doğrulanamadı."));
       }
     }
   }
@@ -421,7 +449,7 @@ function App() {
       setAnalysisProgress((current) => current ? {...current, percent: 100, label: "Analiz tamamlandı"} : null);
       setMessage(result?.remaining > 0 ? `${result.remaining} hamle daha kaldı; servis süre sınırına takılmamak için tekrar dene.` : "Analiz tamamlandı.");
     } catch (error) {
-      setMessage(error.message || "Analiz sırasında hata oluştu.");
+      setMessage(uiError(error, "Analiz sırasında hata oluştu."));
     } finally {
       setBusy(false);
       setTimeout(() => setAnalysisProgress(null), 900);
@@ -451,7 +479,7 @@ function App() {
       setFreePos((current) => [...current.slice(0, freeIdx + 1), next]);
       setFreeIdx((current) => current + 1);
     } catch (error) {
-      setMessage(error.message || "Hamle analiz edilemedi.");
+      setMessage(uiError(error, "Hamle analiz edilemedi."));
     }
   }
 
@@ -472,7 +500,7 @@ function App() {
       await refreshAll();
       setMessage(`${result.imported} oyun içe aktarıldı. ${result.archives_checked} arşiv tarandı${result.failed_count ? `, ${result.failed_count} oyun raporlandı.` : "."}`);
     } catch (error) {
-      setMessage(error.message || "Chess.com senkronizasyonu başarısız.");
+      setMessage(uiError(error, "Chess.com senkronizasyonu başarısız."));
     } finally {
       setBusy(false);
     }
@@ -499,7 +527,7 @@ function App() {
       setMessage(`PGN başarıyla içe alındı. ${result.moves} hamle işlendi.`);
       setPage("review");
     } catch (error) {
-      setMessage(error.message || "PGN import başarısız.");
+      setMessage(uiError(error, "PGN import başarısız."));
     } finally {
       setBusy(false);
     }
@@ -510,7 +538,7 @@ function App() {
       const result = await postJson("/api/billing/checkout-intent", {plan_id: planId, seats: 1});
       setMessage(result.message);
     } catch (error) {
-      setMessage(error.message || "Checkout intent oluşturulamadı.");
+      setMessage(uiError(error, "Checkout intent oluşturulamadı."));
     }
   }
 
@@ -1265,7 +1293,7 @@ function AuthDrawer({open, onClose, token, setToken, user, setUser, setMessage})
       setMessage(mode === "login" ? "Giriş başarılı." : "Hesap oluşturuldu.");
       onClose();
     } catch (submitError) {
-      setError(submitError.message);
+      setError(uiError(submitError, "Giriş isteği tamamlanamadı."));
     } finally {
       setBusy(false);
     }
