@@ -75,6 +75,7 @@ CORS_ORIGINS = [
     for origin in os.getenv("MOVELAB_CORS_ORIGINS", DEFAULT_CORS_ORIGINS).split(",")
     if origin.strip()
 ]
+CORS_ORIGIN_REGEX = os.getenv("MOVELAB_CORS_ORIGIN_REGEX", r"https://.*\.vercel\.app").strip() or None
 
 CHESSCOM_USER_AGENT = os.getenv(
     "CHESSCOM_USER_AGENT",

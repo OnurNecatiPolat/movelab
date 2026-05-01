@@ -32,7 +32,10 @@ import {
 } from "lucide-react";
 import "./styles/app.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+const DEFAULT_API_BASE = import.meta.env.PROD
+  ? "https://movelab-production-f81c.up.railway.app"
+  : "http://127.0.0.1:8000";
+const API_BASE = (import.meta.env.VITE_API_BASE || DEFAULT_API_BASE).replace(/\/$/, "");
 const APP_VERSION = "0.8.0";
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
 const RANKS = [8, 7, 6, 5, 4, 3, 2, 1];
@@ -397,15 +400,16 @@ function App() {
   }
 
   async function importPgn() {
-    if (!pgnForm.ownerUsername.trim() || !pgnForm.pgn.trim()) {
-      setMessage("PGN import için kullanıcı adı ve PGN gerekli.");
+    const ownerUsername = pgnForm.ownerUsername.trim() || user?.username || "guest";
+    if (!pgnForm.pgn.trim()) {
+      setMessage("PGN import için PGN metni gerekli.");
       return;
     }
 
     setBusy(true);
     try {
       const result = await postJson("/api/import/pgn", {
-        owner_username: pgnForm.ownerUsername.trim(),
+        owner_username: ownerUsername,
         pgn: pgnForm.pgn,
         url: pgnForm.url.trim() || null,
       });
