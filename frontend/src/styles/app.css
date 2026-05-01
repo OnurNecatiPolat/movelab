@@ -1607,3 +1607,324 @@ textarea {
     font-size: 0.82rem;
   }
 }
+
+
+/* MoveLab Coach Pro Update */
+.action-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.coach-summary-card {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top left, rgba(111, 114, 216, 0.16), transparent 36%),
+    radial-gradient(circle at top right, rgba(46, 143, 90, 0.18), transparent 34%),
+    linear-gradient(145deg, rgba(255,255,255,0.98), rgba(248,251,240,0.94));
+}
+
+.coach-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.coach-score-tile {
+  border-radius: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.9);
+}
+
+.coach-score-tile span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.coach-score-tile strong {
+  display: block;
+  margin-top: 4px;
+  font-size: clamp(26px, 4vw, 42px);
+  line-height: 1;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.coach-score-tile.win { box-shadow: inset 0 0 0 999px rgba(16,185,129,0.08); }
+.coach-score-tile.loss { box-shadow: inset 0 0 0 999px rgba(244,63,94,0.08); }
+.coach-score-tile.draw { box-shadow: inset 0 0 0 999px rgba(14,165,233,0.08); }
+
+.coach-note {
+  margin-top: 14px;
+  border-radius: 18px;
+  padding: 16px;
+  color: white;
+  background: linear-gradient(135deg, #172315, #243d21 42%, #2f4b26);
+  box-shadow: 0 18px 60px rgba(23, 35, 21, 0.18);
+}
+
+.coach-note p {
+  margin: 0;
+  line-height: 1.65;
+}
+
+.coach-note p + p {
+  margin-top: 10px;
+  color: rgba(255,255,255,0.86);
+}
+
+.study-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.study-plan-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(255,255,255,0.82);
+}
+
+.study-plan-card span {
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 900;
+  color: #17633d;
+  background: #ecfff5;
+  border: 1px solid rgba(16,185,129,.20);
+  border-radius: 999px;
+  padding: 5px 8px;
+}
+
+.study-plan-card strong {
+  display: block;
+  margin-top: 10px;
+}
+
+.study-plan-card p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.critical-list {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.critical-item {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.78);
+  border: 1px solid var(--border);
+}
+
+.critical-item span {
+  font-weight: 900;
+  color: var(--navy);
+}
+
+.critical-item strong {
+  font-size: 13px;
+}
+
+.critical-item small {
+  grid-column: 2;
+  color: var(--muted);
+}
+
+.move-quality-card {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.98), rgba(246,248,255,.94)),
+    radial-gradient(circle at top right, rgba(90,167,216,.18), transparent 40%);
+}
+
+.quality-buckets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.quality-chip {
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  padding: 6px 9px;
+  font-size: 11px;
+  font-weight: 900;
+  background: rgba(255,255,255,.75);
+}
+
+.loss-timeline {
+  min-height: 132px;
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  padding: 16px 12px 12px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.94), rgba(242,248,233,.9)),
+    repeating-linear-gradient(0deg, transparent, transparent 31px, rgba(15,23,42,.06) 32px);
+  overflow-x: auto;
+}
+
+.loss-bar {
+  min-width: 18px;
+  border: 0;
+  border-radius: 9px 9px 5px 5px;
+  cursor: pointer;
+  position: relative;
+  background: linear-gradient(180deg, #74b842, #2e8f5a);
+  box-shadow: 0 10px 24px rgba(15,23,42,.10);
+  transition: transform .16s ease, box-shadow .16s ease, filter .16s ease;
+}
+
+.loss-bar:hover,
+.loss-bar.active {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 34px rgba(15,23,42,.20);
+  filter: saturate(1.15);
+}
+
+.loss-bar span {
+  position: absolute;
+  left: 50%;
+  bottom: -18px;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.loss-brilliant,
+.loss-best,
+.loss-excellent {
+  background: linear-gradient(180deg, #a4d84d, #2e8f5a);
+}
+
+.loss-good {
+  background: linear-gradient(180deg, #5aa7d8, #2e8f5a);
+}
+
+.loss-inaccuracy,
+.loss-wrong {
+  background: linear-gradient(180deg, #efb43a, #d96b45);
+}
+
+.loss-mistake,
+.loss-blunder,
+.loss-missed {
+  background: linear-gradient(180deg, #f97316, #e11d48);
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.legend-good { background: #2e8f5a; }
+.legend-warning { background: #efb43a; }
+.legend-danger { background: #e11d48; }
+
+.momentum-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.momentum-chart {
+  height: 220px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(111,114,216,.10), transparent 34%),
+    linear-gradient(180deg, #ffffff, #f4f8ff 52%, #f2f8e9);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 16px 44px rgba(23,35,21,.08);
+}
+
+.momentum-line {
+  stroke-width: 5.5;
+  filter: drop-shadow(0 8px 12px rgba(32,54,29,.18));
+}
+
+.momentum-dot {
+  transition: r .15s ease, filter .15s ease;
+}
+
+.momentum-dot:hover {
+  filter: drop-shadow(0 0 8px rgba(116,184,66,.75));
+}
+
+.momentum-meta {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,251,240,.9));
+  box-shadow: 0 16px 42px rgba(23,35,21,.08);
+}
+
+.momentum-stat {
+  background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,251,240,.86));
+}
+
+.coach-card {
+  background:
+    radial-gradient(circle at top right, rgba(116,184,66,.14), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,251,240,.94));
+}
+
+.coach-steps {
+  gap: 10px;
+}
+
+.coach-step {
+  border-radius: 16px;
+  background: rgba(255,255,255,.8);
+  border: 1px solid rgba(37,73,28,.12);
+}
+
+.coach-step strong {
+  line-height: 1.6;
+}
+
+@media (max-width: 720px) {
+  .coach-summary-grid,
+  .study-plan-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .momentum-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .loss-bar {
+    min-width: 16px;
+  }
+}
