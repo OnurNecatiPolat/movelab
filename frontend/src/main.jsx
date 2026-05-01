@@ -139,7 +139,7 @@ function sleep(ms) {
 function friendlyNetworkMessage(error) {
   const text = String(error?.message || "").toLowerCase();
   if (NETWORK_ERROR_NEEDLES.some((needle) => text.includes(needle))) {
-    return "Sunucuya ulaşılamadı. Bağlantı otomatik tekrar denendi; birkaç saniye sonra işlemi yeniden başlat.";
+    return "Bağlantı isteği tamamlanamadı. Backend URL ve Vercel ortam değişkenlerini kontrol et.";
   }
   return error?.message || "Backend bağlantısı kurulamadı.";
 }
@@ -151,6 +151,10 @@ function isTransientStatus(status) {
 function uiError(error, fallback = "İstek tamamlanamadı.") {
   if (error?.status === 0) return friendlyNetworkMessage(error);
   return error?.message || fallback;
+}
+
+function isNetworkApiError(error) {
+  return error?.status === 0;
 }
 
 function apiUrls(pathOrUrl) {
@@ -352,7 +356,9 @@ function App() {
       if (billingResult.status === "fulfilled") setBillingCatalog(billingResult.value);
     } catch (error) {
       setApiStatus("offline");
-      setMessage(uiError(error, "Backend bağlantısı kurulamadı."));
+      if (!isNetworkApiError(error)) {
+        setMessage(uiError(error, "Backend bağlantısı kurulamadı."));
+      }
     }
   }
 
@@ -368,7 +374,9 @@ function App() {
         }
       });
     } catch (error) {
-      setMessage(uiError(error, "Oyunlar yüklenemedi."));
+      if (!isNetworkApiError(error)) {
+        setMessage(uiError(error, "Oyunlar yüklenemedi."));
+      }
     }
   }
 
@@ -389,7 +397,9 @@ function App() {
         setFreeIdx(0);
       });
     } catch (error) {
-      setMessage(uiError(error, "Review alınamadı."));
+      if (!isNetworkApiError(error)) {
+        setMessage(uiError(error, "Review alınamadı."));
+      }
     }
   }
 
@@ -409,7 +419,9 @@ function App() {
         setToken(null);
         setUser(null);
       } else {
-        setMessage(uiError(error, "Oturum kontrolü geçici olarak doğrulanamadı."));
+        if (!isNetworkApiError(error)) {
+          setMessage(uiError(error, "Oturum kontrolü geçici olarak doğrulanamadı."));
+        }
       }
     }
   }
@@ -900,6 +912,29 @@ function ReviewPage(props) {
           )}
         </div>
 
+        <aside className="side-column review-side">
+          <Coach pos={pos} compare={compare} shadow={shadow} setShadow={setShadow} />
+          <Notation
+            positions={positions}
+            active={active}
+            onSelect={(next) => {
+              if (free) setFreeIdx(next);
+              else setIdx(next);
+            }}
+            cmp={cmp}
+            setCmp={setCmp}
+          />
+          <MoveDNA pos={pos} />
+          <RootCause pos={pos} />
+          <FocusQueue
+            positions={reviewPositions}
+            onSelect={(next) => {
+              setFree(false);
+              setIdx(next);
+              setCmp(next);
+            }}
+          />
+        </aside>
       </div>
 
       <ReviewDetailsDrawer
@@ -1547,6 +1582,11 @@ function EvalBar({cp}) {
   );
 }
 
+function moveSide(index) {
+  if (index <= 0) return "Başlangıç";
+  return index % 2 === 1 ? "Beyaz" : "Siyah";
+}
+
 function Notation({positions, active, onSelect, cmp, setCmp}) {
   const [query, setQuery] = useState("");
   const [qualityFilter, setQualityFilter] = useState("all");
@@ -1587,7 +1627,11 @@ function Notation({positions, active, onSelect, cmp, setCmp}) {
             className={cx("move-token", `quality-${position.quality || "book"}`, active === index && "active-token")}
             onClick={() => onSelect(index)}
           >
-            {index}. {position.played || position.move}
+            <span className="move-index">{index === 0 ? "0" : `${Math.ceil(index / 2)}${index % 2 === 0 ? "..." : "."}`}</span>
+            <span className="move-main">
+              <b>{position.played || position.move}</b>
+              <small>{moveSide(index)} · {qLabel(position.quality)} · {evalText(position.evalCp)}</small>
+            </span>
             <span className={cmp === index ? "compare-pill active" : "compare-pill"} onClick={(event) => { event.stopPropagation(); setCmp(index); }}>
               cmp
             </span>
@@ -1598,22 +1642,54 @@ function Notation({positions, active, onSelect, cmp, setCmp}) {
   );
 }
 
+function coachInsights(pos, delta) {
+  const loss = Number(pos.loss || 0);
+  const played = pos.played || "-";
+  const best = pos.best || "-";
+  const quality = pos.quality || "analysis";
+  const tacticalLine = pos.tactic || "Taktik tema netleşmedi.";
+  const planLine = pos.plan || "Taş aktivitesini artır, şah güvenliğini koru ve zorunlu hamleleri önce kontrol et.";
+
+  const priority = quality === "blunder" || loss >= 220
+    ? "Önce zorunlu hamleleri ara: şah çekme, taş alma ve doğrudan tehditleri tek tek ele."
+    : quality === "mistake" || loss >= 110
+      ? "Aday hamleleri en az iki hamle ileri kıyasla; yalnızca ilk fikre güvenme."
+      : quality === "missed"
+        ? "Pozisyonda fırsat vardı; en aktif taşını ve rakibin zayıf karesini birlikte düşün."
+        : "Karar yapısı iyi; aynı planı tempo kaybetmeden devam ettirmeye çalış.";
+
+  return [
+    ["Oynanan hamle", `${played} hamlesi pozisyonu ${qLabel(quality).toLowerCase()} sınıfına taşıyor.`],
+    ["Daha güçlü fikir", `${best} daha güvenli aday. Eval farkı ${delta >= 0 ? "+" : ""}${(delta / 100).toFixed(2)} olarak okunuyor.`],
+    ["Neden", tacticalLine],
+    ["Plan", planLine],
+    ["Antrenman odağı", priority],
+  ];
+}
+
 function Coach({pos, compare, shadow, setShadow}) {
   const delta = Number(pos.evalCp || 0) - Number(compare.evalCp || 0);
+  const insights = coachInsights(pos, delta);
   return (
-    <Card cls="card-pad">
+    <Card cls="card-pad coach-card">
       <div className="split-head">
-        <strong>Coach brief</strong>
+        <div>
+          <div className="eyebrow">Move coach</div>
+          <strong>Hamle kararı ve gelişim notu</strong>
+        </div>
         <Badge cls={`quality-${pos.quality || "book"}`}>{qLabel(pos.quality)}</Badge>
       </div>
-      <div className="panel-black">
-        <div className="small">Teşhis</div>
-        <p>{shadow ? "Shadow mode açık. Önce kendi aday hamleni belirle, sonra rehberi aç." : pos.advice}</p>
+      <div className="panel-black coach-hero">
+        <div className="small">Koç teşhisi</div>
+        <p>{shadow ? "Shadow mode açık. Önce kendi aday hamleni belirle, sonra koç yorumunu aç." : pos.advice}</p>
       </div>
-      <div className="info-grid">
-        <Info label="Oynanan" value={shadow ? "Gizli" : pos.played} />
-        <Info label="Önerilen" value={shadow ? "Gizli" : pos.best} />
-        <Info label="Eval farkı" value={shadow ? "Gizli" : `${delta >= 0 ? "+" : ""}${(delta / 100).toFixed(2)}`} />
+      <div className="coach-steps">
+        {insights.map(([label, text]) => (
+          <div key={label} className="coach-step">
+            <span>{label}</span>
+            <strong>{shadow && (label === "Oynanan hamle" || label === "Daha güçlü fikir") ? "Gizli" : text}</strong>
+          </div>
+        ))}
       </div>
       <Button cls="btn-violet" onClick={() => setShadow((current) => !current)} title="Shadow review modunu değiştir">
         {shadow ? "Normal göster" : "Hamleyi gizle"}
