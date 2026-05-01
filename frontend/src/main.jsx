@@ -500,6 +500,8 @@ function App() {
     try {
       let guard = 0;
       let result = null;
+      let processedTotal = 0;
+      let previousRemaining = null;
       do {
         result = await postJson("/api/games/analyze-all", {
           deep: true,
@@ -511,15 +513,21 @@ function App() {
           force: false,
         });
         guard += 1;
-        const processed = result.processedMoves || 0;
+        const processed = Number(result.processedMoves || 0);
+        processedTotal += processed;
         const remaining = result.remainingMoves || 0;
-        const percent = processed + remaining > 0 ? Math.round((processed / (processed + remaining)) * 100) : 100;
+        if (previousRemaining !== null && remaining >= previousRemaining && processed === 0) {
+          break;
+        }
+        previousRemaining = remaining;
+        const total = processedTotal + remaining;
+        const percent = total > 0 ? Math.round((processedTotal / total) * 100) : 100;
         setAnalysisProgress({
           active: true,
           label: "Toplu derin analiz çalışıyor",
           percent: Math.min(99, percent),
-          analyzed: processed,
-          total: processed + remaining,
+          analyzed: processedTotal,
+          total,
         });
         if (result.coachSummary) setCoachSummary(result.coachSummary);
         await Promise.all([loadGames(), loadHealth()]);
@@ -994,8 +1002,10 @@ function ReviewPage(props) {
             <EvalBar cp={pos.evalCp} />
           </Card>
 
-          <Momentum positions={reviewPositions} active={idx} onSelect={(next) => { setFree(false); setIdx(next); setCmp(next); }} />
-          <MoveQualityChart positions={reviewPositions} active={idx} onSelect={(next) => { setFree(false); setIdx(next); setCmp(next); }} />
+          <div className="review-analytics-grid">
+            <Momentum positions={reviewPositions} active={idx} onSelect={(next) => { setFree(false); setIdx(next); setCmp(next); }} />
+            <MoveQualityChart positions={reviewPositions} active={idx} onSelect={(next) => { setFree(false); setIdx(next); setCmp(next); }} />
+          </div>
 
           {free && (
             <Card cls="card-pad">
@@ -1925,7 +1935,7 @@ function Coach({pos, compare, shadow, setShadow}) {
         {insights.map(([label, text]) => (
           <div key={label} className="coach-step">
             <span>{label}</span>
-            <strong>{shadow && (label === "Oynanan hamle" || label === "Daha güçlü fikir") ? "Gizli" : text}</strong>
+            <strong>{shadow && (label === "Oynanan hamle" || label === "Daha temiz aday") ? "Gizli" : text}</strong>
           </div>
         ))}
       </div>

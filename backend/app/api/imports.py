@@ -145,6 +145,7 @@ async def sync_chesscom(payload: ChesscomSyncRequest):
     skipped = 0
     skipped_existing = 0
     failed = []
+    seen_keys = set()
 
     try:
         with db() as session:
@@ -161,6 +162,12 @@ async def sync_chesscom(payload: ChesscomSyncRequest):
                         continue
 
                     link = game.get("url") or parsed_headers.get("Link") or parsed_headers.get("Site")
+                    dedupe_key = link or pgn
+                    if dedupe_key in seen_keys:
+                        skipped_existing += 1
+                        continue
+                    seen_keys.add(dedupe_key)
+
                     existing = None
                     if link:
                         existing = session.execute(select(Game).where(Game.chesscom_url == link)).scalar_one_or_none()

@@ -1950,3 +1950,31 @@ body{background:radial-gradient(circle at 8% -6%,rgba(139,92,246,.25),transparen
 @media(max-width:1180px){.review-analytics-grid,.momentum-shell{grid-template-columns:1fr}.coach-principles{grid-template-columns:1fr}}
 @media(max-width:860px){.main{margin-left:0}.sidebar{transform:translateX(-102%);transition:transform .2s ease;max-width:min(86vw,320px)}.sidebar.open{transform:translateX(0)}.header{padding:12px 14px;gap:10px}.header-title{font-size:1rem}.header-right .badge:nth-of-type(n+2){display:none}.content{padding:12px}.hero-actions,.action-grid,.action-stack,.step-actions{display:grid;grid-template-columns:1fr;width:100%}.btn,button{max-width:100%}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.board-shell{width:100%}.board-wrap{grid-template-columns:22px minmax(0,1fr);grid-template-rows:minmax(0,1fr) 24px;gap:5px}.files,.ranks{font-size:10px}}
 @media(max-width:560px){.stats{grid-template-columns:1fr}.header-right{width:100%;justify-content:stretch}.header-right .btn{width:100%}.card-pad{padding:14px}.title{font-size:clamp(1.45rem,8vw,2.15rem)}.loss-timeline{min-height:128px}}
+
+/* Stability pass: review analytics layout + readable mobile composition */
+.review-analytics-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.review-analytics-grid .card {
+  height: 100%;
+}
+
+.review-side {
+  position: sticky;
+  top: 84px;
+}
+
+@media (max-width: 1180px) {
+  .review-analytics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .review-side {
+    position: static;
+    top: auto;
+  }
+}
