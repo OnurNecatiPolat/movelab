@@ -765,6 +765,21 @@ function App() {
             </div>
           </div>
 
+          <nav className="header-nav" aria-label="Ana sayfa bölümleri">
+            {PAGE_ITEMS.map(({id, label, icon: Icon}) => (
+              <button
+                key={id}
+                type="button"
+                className={page === id ? "active" : ""}
+                onClick={() => setPage(id)}
+                title={label}
+              >
+                <Icon size={15} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </nav>
+
           <div className="header-right">
             <Badge>Database {systemStatus?.database?.backend || "-"}</Badge>
             <Badge>Engine {systemStatus?.stockfish?.available ? "Ready" : "Missing"}</Badge>
@@ -840,6 +855,10 @@ function App() {
               syncNewAndAnalyze={syncNewAndAnalyze}
               analyzeAllGames={analyzeAllGames}
               coachSummary={coachSummary}
+              games={games}
+              gameId={gameId}
+              setGameId={setGameId}
+              setPage={setPage}
             />
           )}
 
@@ -1323,7 +1342,7 @@ function CoachPage({coachSummary, platformStats, busy, syncNewAndAnalyze, analyz
 }
 
 
-function StudioPage({systemStatus, platformStats, busy, syncForm, setSyncForm, pgnForm, setPgnForm, syncChesscom, importPgn, syncNewAndAnalyze, analyzeAllGames, coachSummary}) {
+function StudioPage({systemStatus, platformStats, busy, syncForm, setSyncForm, pgnForm, setPgnForm, syncChesscom, importPgn, syncNewAndAnalyze, analyzeAllGames, coachSummary, games, gameId, setGameId, setPage}) {
   return (
     <div className="page-grid">
       <Card cls="card-pad section-header">
@@ -1331,6 +1350,17 @@ function StudioPage({systemStatus, platformStats, busy, syncForm, setSyncForm, p
         <h1 className="title">Oyunları içe aktar ve analiz kuyruğunu yönet</h1>
         <p className="hero-copy">Sadece yeni oyunları ekle, eski analizleri bozmadan derin analiz kuyruğunu çalıştır ve oyun havuzunu temiz tut.</p>
       </Card>
+
+      <GameLibrary
+        games={games}
+        activeId={gameId}
+        openGame={(nextId) => {
+          setGameId(nextId);
+          setPage("review");
+        }}
+        syncNewAndAnalyze={syncNewAndAnalyze}
+        busy={busy}
+      />
 
       <div className="studio-grid">
         <Card cls="card-pad">
@@ -1427,6 +1457,65 @@ function StudioPage({systemStatus, platformStats, busy, syncForm, setSyncForm, p
         />
       </div>
     </div>
+  );
+}
+
+function GameLibrary({games, activeId, openGame, syncNewAndAnalyze, busy}) {
+  const visibleGames = games.slice(0, 9);
+  return (
+    <Card cls="card-pad game-library-card">
+      <div className="split-head">
+        <div>
+          <div className="eyebrow">Kütüphaneniz</div>
+          <strong>Oyunlarım</strong>
+          <p className="small">Son eklenen partiler, doğruluk ve analiz durumuyla birlikte burada.</p>
+        </div>
+        <Button cls="btn-violet" disabled={busy} onClick={syncNewAndAnalyze} title="Sadece yeni oyunları çek ve analiz et">
+          {busy ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
+          Yeni oyun + analiz
+        </Button>
+      </div>
+
+      {visibleGames.length ? (
+        <div className="game-card-grid">
+          {visibleGames.map((item) => {
+            const coverage = coveragePct(item.analysisStatus?.analyzedMoves, item.analysisStatus?.totalMoves);
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={cx("game-card-button", activeId === item.id && "active")}
+                onClick={() => openGame(item.id)}
+                title={`${item.title} incelemesini aç`}
+              >
+                <div className="game-card-top">
+                  <span>{item.result || "*"}</span>
+                  <strong>{fmtAcc(item.userAccuracy ?? item.whiteAccuracy)}</strong>
+                </div>
+                <div className="game-card-title">{item.title}</div>
+                <div className="game-card-meta">
+                  <span>{item.timeClass || "game"}</span>
+                  <span>{item.userColor || "renk yok"}</span>
+                </div>
+                <div className="game-card-progress">
+                  <i style={{width: `${coverage}%`}} />
+                </div>
+                <div className="game-card-foot">
+                  <span>Kapsam {coverage}%</span>
+                  <ArrowRight size={14} />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="empty-library">
+          <Sparkles size={22} />
+          <strong>Henüz oyun yok</strong>
+          <span>Chess.com senkronizasyonu veya PGN import ile ilk oyunu ekleyebilirsin.</span>
+        </div>
+      )}
+    </Card>
   );
 }
 
